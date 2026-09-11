@@ -1,0 +1,264 @@
+/* ============================================================
+   Print-friendly stylesheet for Markdown-to-HTML conversion
+   ============================================================ */
+
+/* --- Reset & Base ----------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+    font-size: 14px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+body {
+    margin: 0 auto;
+    padding: 2rem 2.5rem;
+    max-width: 52rem;
+    font-family: "Segoe UI", Calibri, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fff;
+}
+
+article { max-width: 100%; }
+
+/* --- Typography ------------------------------------------- */
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 1.8em;
+    margin-bottom: 0.5em;
+    line-height: 1.25;
+    color: #111;
+    page-break-after: avoid;
+    break-after: avoid;
+}
+
+h1 { font-size: 1.9rem; border-bottom: 2px solid #333; padding-bottom: 0.3em; margin-top: 0; }
+h2 { font-size: 1.5rem; border-bottom: 1px solid #ccc; padding-bottom: 0.25em; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.1rem; }
+h5 { font-size: 1rem; font-weight: 600; }
+h6 { font-size: 0.95rem; font-weight: 600; color: #444; }
+
+p { margin: 0.6em 0; orphans: 3; widows: 3; }
+
+blockquote {
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-left: 4px solid #888;
+    background: #f7f7f7;
+    color: #333;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+blockquote p { margin: 0.3em 0; }
+
+hr {
+    border: none;
+    border-top: 1px solid #ccc;
+    margin: 1.5em 0;
+}
+
+/* --- Lists ------------------------------------------------ */
+ul, ol { margin: 0.5em 0; padding-left: 1.6em; }
+li { margin: 0.15em 0; }
+li > ul, li > ol { margin: 0.15em 0; }
+
+/* --- Links ------------------------------------------------ */
+a { color: #0b5394; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* --- Inline Code ------------------------------------------ */
+code {
+    font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+    font-size: 0.88em;
+    background: #f0f0f0;
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+    word-break: break-word;
+}
+
+/* --- Code Blocks ------------------------------------------ */
+pre {
+    margin: 0.8em 0;
+    padding: 0.8em 1em;
+    background: #f6f6f6;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+    word-break: normal;
+}
+
+/* --- Tables ----------------------------------------------- */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.8em 0;
+    font-size: 0.9rem;
+    page-break-inside: auto;
+}
+
+thead {
+    page-break-after: avoid;
+    break-after: avoid;
+}
+
+tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+th, td {
+    border: 1px solid #bbb;
+    padding: 0.4em 0.6em;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    background: #eaeaea;
+    font-weight: 600;
+}
+
+tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+/* Keep code inside table cells readable */
+td code, th code {
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
+/* --- Images ----------------------------------------------- */
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* --- Pygments Syntax Highlighting ------------------------- */
+pre { line-height: 1.45; }
+.highlight { background: #f8f8f8; }
+.highlight .hll { background-color: #ffffcc; }
+.highlight .c { color: #3D7B7B; font-style: italic; }
+.highlight .err { border: 1px solid #F00; }
+.highlight .k { color: #008000; font-weight: bold; }
+.highlight .o { color: #666; }
+.highlight .ch { color: #3D7B7B; font-style: italic; }
+.highlight .cm { color: #3D7B7B; font-style: italic; }
+.highlight .cp { color: #9C6500; }
+.highlight .cpf { color: #3D7B7B; font-style: italic; }
+.highlight .c1 { color: #3D7B7B; font-style: italic; }
+.highlight .cs { color: #3D7B7B; font-style: italic; }
+.highlight .gd { color: #A00000; }
+.highlight .ge { font-style: italic; }
+.highlight .ges { font-weight: bold; font-style: italic; }
+.highlight .gr { color: #E40000; }
+.highlight .gh { color: #000080; font-weight: bold; }
+.highlight .gi { color: #008400; }
+.highlight .go { color: #717171; }
+.highlight .gp { color: #000080; font-weight: bold; }
+.highlight .gs { font-weight: bold; }
+.highlight .gu { color: #800080; font-weight: bold; }
+.highlight .gt { color: #04D; }
+.highlight .kc { color: #008000; font-weight: bold; }
+.highlight .kd { color: #008000; font-weight: bold; }
+.highlight .kn { color: #008000; font-weight: bold; }
+.highlight .kp { color: #008000; }
+.highlight .kr { color: #008000; font-weight: bold; }
+.highlight .kt { color: #B00040; }
+.highlight .m { color: #666; }
+.highlight .s { color: #BA2121; }
+.highlight .na { color: #687822; }
+.highlight .nb { color: #008000; }
+.highlight .nc { color: #00F; font-weight: bold; }
+.highlight .no { color: #800; }
+.highlight .nd { color: #A2F; }
+.highlight .ni { color: #717171; font-weight: bold; }
+.highlight .ne { color: #CB3F38; font-weight: bold; }
+.highlight .nf { color: #00F; }
+.highlight .nl { color: #767600; }
+.highlight .nn { color: #00F; font-weight: bold; }
+.highlight .nt { color: #008000; font-weight: bold; }
+.highlight .nv { color: #19177C; }
+.highlight .ow { color: #A2F; font-weight: bold; }
+.highlight .w { color: #BBB; }
+.highlight .mb { color: #666; }
+.highlight .mf { color: #666; }
+.highlight .mh { color: #666; }
+.highlight .mi { color: #666; }
+.highlight .mo { color: #666; }
+.highlight .sa { color: #BA2121; }
+.highlight .sb { color: #BA2121; }
+.highlight .sc { color: #BA2121; }
+.highlight .dl { color: #BA2121; }
+.highlight .sd { color: #BA2121; font-style: italic; }
+.highlight .s2 { color: #BA2121; }
+.highlight .se { color: #AA5D1F; font-weight: bold; }
+.highlight .sh { color: #BA2121; }
+.highlight .si { color: #A45A77; font-weight: bold; }
+.highlight .sx { color: #008000; }
+.highlight .sr { color: #A45A77; }
+.highlight .s1 { color: #BA2121; }
+.highlight .ss { color: #19177C; }
+.highlight .bp { color: #008000; }
+.highlight .fm { color: #00F; }
+.highlight .vc { color: #19177C; }
+.highlight .vg { color: #19177C; }
+.highlight .vi { color: #19177C; }
+.highlight .vm { color: #19177C; }
+.highlight .il { color: #666; }
+
+/* --- Print Styles ----------------------------------------- */
+@page {
+    size: A4;
+    margin: 1.8cm 1.5cm;
+}
+
+@media print {
+    html { font-size: 11pt; }
+
+    body {
+        padding: 0;
+        max-width: 100%;
+        color: #000;
+    }
+
+    a { color: #000; text-decoration: underline; }
+    a[href^="http"]::after {
+        content: " (" attr(href) ")";
+        font-size: 0.8em;
+        color: #555;
+        word-break: break-all;
+    }
+    a[href^="#"]::after { content: none; }
+
+    pre, code { font-size: 9pt; }
+
+    pre {
+        border: 1px solid #ccc;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    table { font-size: 9pt; }
+    th { background: #e0e0e0 !important; }
+    tbody tr:nth-child(even) { background: #f4f4f4 !important; }
+
+    blockquote { background: #f2f2f2 !important; }
+
+    h1 { font-size: 18pt; }
+    h2 { font-size: 15pt; }
+    h3 { font-size: 13pt; }
+}
