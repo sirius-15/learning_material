@@ -72,6 +72,16 @@
 38. [Common Pitfalls](#38-common-pitfalls)
 39. [Interview Questions and Answers](#39-interview-questions-and-answers)
 
+### Part 10: Specialized Testing -- Concurrency, GPU, Golden Files, Benchmarks, TDD, and Other Frameworks
+
+40. [Testing Concurrent Code](#40-testing-concurrent-code)
+41. [Testing GPU / HIP Code](#41-testing-gpu--hip-code)
+42. [Golden-File, Snapshot, and Approval Testing](#42-golden-file-snapshot-and-approval-testing)
+43. [Microbenchmarking with Google Benchmark](#43-microbenchmarking-with-google-benchmark)
+44. [Test-Driven Development (TDD)](#44-test-driven-development-tdd)
+45. [Catch2 v3 and doctest Compared with GoogleTest](#45-catch2-v3-and-doctest-compared-with-googletest)
+46. [Mutation Testing with Mull](#46-mutation-testing-with-mull)
+
 ---
 
 # Part 1: Foundations
@@ -136,11 +146,13 @@ GoogleTest belongs to the **xUnit** family -- a lineage that began with Kent Bec
 | Framework | Header-only | Style | Mocking | Maturity | Notable Strengths |
 |---|---|---|---|---|---|
 | **GoogleTest** | No (compiled lib) | xUnit | Yes (GoogleMock) | Very mature; industry standard | Death tests, parameterized/typed tests, rich matchers, IDE/CI tooling |
-| **Catch2** | Header-only (v2) / module (v3) | BDD-flavored macros (`SECTION`/`GIVEN`) | Trompeloeil (separate) | Mature | Easy to drop in, expressive macros, no link step |
+| **Catch2** | Header-only (v2) / compiled library (v3) | BDD-flavored macros (`SECTION`/`GIVEN`) | Trompeloeil (separate) | Mature | Easy to drop in, expressive macros, sections/generators, built-in micro-benchmarks |
 | **doctest** | Header-only | xUnit | Trompeloeil (separate) | Mature | Fastest compile times, near-zero overhead, can live in production headers |
 | **Boost.Test** | Both modes | xUnit | None built-in | Very mature | Tight Boost ecosystem fit, XML reports, comprehensive features |
 | **CppUTest** | No | xUnit | CppUMock | Mature | Embedded / freestanding C, manual leak detection |
 | **FakeIt / HippoMocks** | Header-only | Mock-only | Mocking only | Mature | Drop-in mocks without needing a virtual base |
+
+For a side-by-side syntax comparison of GoogleTest, Catch2 v3, and doctest (SECTION/SUBCASE, BDD macros), see [Section 45](#45-catch2-v3-and-doctest-compared-with-googletest).
 
 ```text
 GoogleTest's market position:
@@ -1500,7 +1512,7 @@ TEST(Counter, SecondIncrement) {
 }
 ```
 
-If you need true sharing, use the suite-level hooks ([Section 10.1](#101-setuptestsuite-teardowntestsuite)) which document the intent.
+If you need true sharing, use the suite-level hooks ([Section 10.1](#101-setuptestsuite--teardowntestsuite)) which document the intent.
 
 ## 11.2 Static Members for Suite-Wide State
 
@@ -2233,7 +2245,7 @@ The XML report then contains `<testcase ... p99_ms="87">`.
 
 ## 17.3 Skipping Tests at Runtime
 
-`GTEST_SKIP()` (and `GTEST_SKIP_IF` in newer versions) marks the current test as skipped:
+`GTEST_SKIP()` marks the current test as skipped. There is no `GTEST_SKIP_IF` macro; for a conditional skip write `if (cond) GTEST_SKIP() << "reason";`:
 
 ```cpp
 TEST(GpuTest, KernelLaunch) {
@@ -2243,7 +2255,7 @@ TEST(GpuTest, KernelLaunch) {
 }
 ```
 
-Skipped tests are reported as `[ SKIPPED ]` and do not count as failures. This is preferable to silently passing the test or printing a warning -- it makes coverage gaps visible.
+Skipped tests are reported as `[ SKIPPED ]` and do not count as failures. This is preferable to silently passing the test or printing a warning -- it makes coverage gaps visible. For a complete HIP fixture that skips without a device (and fails on GPU runners where a device is required), see [Section 41.3](#413-skipping-when-there-is-no-device).
 
 ## 17.4 Disabled Tests
 
@@ -2297,7 +2309,7 @@ Helpful flags for debugging flakiness or focusing on a subset:
 |---|---|
 | `--gtest_filter=PATTERN` | Run only tests matching `PATTERN` (glob with `*`, `?`, `-`) |
 | `--gtest_repeat=N` | Run each test `N` times |
-| `--gtest_shuffle` | Random order of tests within a suite |
+| `--gtest_shuffle` | Randomize the order of test suites and of tests within each suite (seed printed; reproduce with `--gtest_random_seed=N`) |
 | `--gtest_random_seed=N` | Seed the shuffle (0 = time-based) |
 | `--gtest_break_on_failure` | `abort()` on the first failure (good for debuggers) |
 | `--gtest_throw_on_failure` | Throw an exception on failure (interop with `try/catch` test runners) |
@@ -4196,7 +4208,7 @@ Even with 100% line coverage:
 - Concurrency bugs (a thread interleaving never tried).
 - Logic bugs in code that runs but produces wrong output.
 
-Coverage is necessary, not sufficient. Pair it with mutation testing (e.g., Mull for C++) for a stronger signal.
+Coverage is necessary, not sufficient. Pair it with mutation testing (e.g., Mull for C++) for a stronger signal -- see [Section 46](#46-mutation-testing-with-mull).
 
 ---
 
@@ -5245,7 +5257,1835 @@ Coverage:
   Build:  --coverage -O0 -g
   Report: gcovr --root . --html-details -o coverage.html
           OR lcov --capture --output-file cov.info && genhtml cov.info -o html
+
+Part 10 extras:
+  std::latch start(N); start.arrive_and_wait();       -- stress-test "starting gun"
+  ctest -L concurrency --repeat until-fail:50         -- flake hunting (also under TSan)
+  GTEST_SKIP() in SetUp() when no HIP device          -- plus REQUIRE_GPU=1 on GPU runners
+  |a - e| <= atol + rtol*|e|                          -- default GPU-vs-host comparison
+  UPDATE_GOLDEN=1 ctest -R golden                     -- regenerate goldens; review the diff
+  benchmark::DoNotOptimize(x); benchmark::ClobberMemory();
+  --benchmark_repetitions=10 --benchmark_report_aggregates_only=true  -- gate on median
+  Catch2: TEST_CASE/SECTION/REQUIRE/CHECK    doctest: TEST_CASE/SUBCASE/REQUIRE/CHECK
+  mull-runner ./tests                                 -- mutation score (Clang-built only)
 ```
+
+---
+
+# Part 10: Specialized Testing -- Concurrency, GPU, Golden Files, Benchmarks, TDD, and Other Frameworks
+
+> Last reviewed: 2026-11 · Versions assumed: GoogleTest 1.17/1.18, Google Benchmark 1.9/1.10, Catch2 3.x, doctest 2.4, ROCm/HIP 7.x, CMake 3.28+, C++20 (`std::latch`, `std::barrier`, `std::bit_cast`).
+
+Parts 1-9 covered GoogleTest as a unit-test framework. This part covers the testing problems that come up in systems, GPU, and performance-tooling work: code with threads, code that runs on a device, tools whose output is a report, and code whose *speed* is the requirement. The complete programs in this part were compiled with GCC 15 / hipcc (ROCm 7.x) and run against GoogleTest, Google Benchmark, Catch2 v3, and doctest.
+
+---
+
+# 40. Testing Concurrent Code
+
+## 40.1 Why Concurrent Tests Are Hard
+
+A sequential test explores one execution. A concurrent test explores **one interleaving out of an astronomically large number**. Two threads each executing 10 atomic steps already have C(20,10) = 184,756 possible interleavings, and the OS scheduler will pick almost the same few on every run on an idle machine. That has three consequences:
+
+| Problem | Consequence | Countermeasure (this section) |
+|---|---|---|
+| The buggy interleaving is rare | A test passes 999,999 times and fails once in CI | Stress loops + repetition, TSan (finds races that did not *manifest*) |
+| The interesting interleaving is not reachable on demand | You cannot write a regression test for the bug you just fixed | Test seams + `std::latch` / `std::barrier` to force the interleaving |
+| A bug shows up as a hang, not a failure | The CI job dies at the global timeout with no useful message | Per-operation timeouts, CTest `TIMEOUT`, TSan lock-order detection |
+| Code depends on wall-clock time | `sleep_for`-based tests are slow *and* flaky | Inject a clock; advance a fake clock in the test |
+
+The toolbox, from cheapest to most precise:
+
+```text
+  probabilistic                                                  deterministic
+  <-------------------------------------------------------------------------->
+  stress loop    --gtest_repeat    TSan (happens-before     latch/barrier at a
+  + start latch  + shuffle         analysis: catches races  test seam: forces
+                 + CPU pinning     that did not manifest)   ONE chosen interleaving
+```
+
+## 40.2 Stress Tests with a Start Latch
+
+A stress test hammers a concurrent data structure from many threads and then checks an **invariant** that any correct execution must satisfy (no lost items, no duplicates, conserved sum). Two details make it far more effective:
+
+1. **A start latch.** Creating a `std::thread` takes tens of microseconds; without a latch the first thread often finishes before the last one starts, so there is no contention at all. `std::latch` (C++20) is a single-use countdown: every thread calls `arrive_and_wait()`, and all are released together.
+2. **Check an invariant, not an output.** The exact interleaving is unknown, so assert on properties that hold for every interleaving.
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <latch>
+#include <mutex>
+#include <optional>
+#include <thread>
+#include <vector>
+
+// ---------------- code under test ----------------
+template <class T>
+class BlockingQueue {
+public:
+    void push(T v) {
+        { std::lock_guard lk(m_); q_.push_back(std::move(v)); }
+        cv_.notify_one();
+    }
+    // Blocks until an item is available, or returns nullopt once closed and drained.
+    std::optional<T> pop() {
+        std::unique_lock lk(m_);
+        cv_.wait(lk, [&] { return !q_.empty() || closed_; });
+        if (q_.empty()) return std::nullopt;
+        T v = std::move(q_.front());
+        q_.pop_front();
+        return v;
+    }
+    void close() {
+        { std::lock_guard lk(m_); closed_ = true; }
+        cv_.notify_all();
+    }
+private:
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::deque<T> q_;
+    bool closed_ = false;
+};
+
+// ---------------- stress test ----------------
+TEST(BlockingQueueStress, EveryItemDeliveredExactlyOnce) {
+    constexpr int kProducers = 4, kConsumers = 4, kPerProducer = 20'000;
+    constexpr int kTotal = kProducers * kPerProducer;
+    BlockingQueue<int> q;
+    std::vector<std::atomic<int>> seen(kTotal);      // value -> times popped
+    std::latch start(kProducers + kConsumers);       // the "starting gun"
+
+    std::vector<std::thread> consumers, producers;
+    for (int c = 0; c < kConsumers; ++c)
+        consumers.emplace_back([&] {
+            start.arrive_and_wait();
+            while (auto v = q.pop()) seen[*v].fetch_add(1, std::memory_order_relaxed);
+        });
+    for (int p = 0; p < kProducers; ++p)
+        producers.emplace_back([&, p] {
+            start.arrive_and_wait();                 // all 8 threads begin together
+            for (int i = 0; i < kPerProducer; ++i) q.push(p * kPerProducer + i);
+        });
+
+    for (auto& t : producers) t.join();
+    q.close();                                       // consumers drain, then exit
+    for (auto& t : consumers) t.join();
+
+    // Invariant: no item lost, none delivered twice.
+    for (int v = 0; v < kTotal; ++v)
+        ASSERT_EQ(seen[v].load(), 1) << "value " << v;
+}
+```
+
+Notes:
+
+- Use `ASSERT_*` (or `EXPECT_*`) only on the **main thread** after `join()`. GoogleTest assertions are thread-safe on POSIX (with pthreads), but a fatal `ASSERT_*` in a worker thread only returns from *that lambda*, it does not stop the test. Collect results into atomics or per-thread vectors and assert afterwards.
+- Size the loop so the test runs in well under a second normally. Make it heavier under a separate label (`ctest -L stress`) or with an environment variable for nightly runs.
+- Run the same test under TSan (Section 40.6). A stress test without TSan only catches races that corrupt the visible result; with TSan, *any* unsynchronized access in the executed interleaving is reported.
+
+## 40.3 Deterministic Interleaving with `std::latch` and `std::barrier`
+
+Stress loops are probabilistic. When you have found (or want to rule out) a specific bad interleaving, force it. The technique:
+
+1. Add a **test seam** at the critical point in the code under test: an injectable callback (no-op in production), a template policy, or a macro that compiles away (RocksDB's `TEST_SYNC_POINT`, Chromium's test hooks).
+2. In the test, make the seam block on a `std::latch` or `std::barrier` so that threads are held **exactly** where you want them.
+
+| Primitive | Reusable? | Typical test use |
+|---|---|---|
+| `std::latch(n)` | No (single-use countdown) | "Start gun" for stress tests; "wait until thread B reached point X" |
+| `std::barrier(n, completion)` | Yes (phases) | Hold N threads at the same point each round; the completion function runs once per phase (e.g., check an invariant between phases) |
+| `std::promise` / `std::future` | No | Hand a single value or signal from one thread to another |
+| `std::condition_variable` | Yes | Arbitrary predicates; more code and easy to get wrong in tests |
+
+Example: a lock-free lazy initializer. The "lost the CAS race" path runs perhaps once in millions of real calls. A barrier in the seam guarantees that **both threads pass the null check before either creates**, so the contended path runs on every test run:
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <barrier>
+#include <functional>
+#include <thread>
+
+struct Widget { int id; };
+
+class LazyWidget {
+public:
+    // `after_check` is a test seam; production code passes nothing.
+    explicit LazyWidget(std::function<void()> after_check = {})
+        : after_check_(std::move(after_check)) {}
+    ~LazyWidget() { delete ptr_.load(); }
+
+    Widget* get() {
+        if (Widget* p = ptr_.load(std::memory_order_acquire)) return p;
+        if (after_check_) after_check_();           // the window between check and act
+        auto* fresh = new Widget{created_.fetch_add(1) + 1};
+        Widget* expected = nullptr;
+        if (ptr_.compare_exchange_strong(expected, fresh,
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire))
+            return fresh;                           // we published ours
+        delete fresh;                               // lost the race: use the winner's
+        discarded_.fetch_add(1);
+        return expected;
+    }
+    int discarded() const { return discarded_.load(); }
+
+private:
+    std::function<void()> after_check_;
+    std::atomic<Widget*> ptr_{nullptr};
+    std::atomic<int> created_{0};
+    std::atomic<int> discarded_{0};
+};
+
+TEST(LazyWidget, BothThreadsInsideRaceWindowStillAgreeOnOneInstance) {
+    std::barrier sync(2);   // neither thread can create until BOTH passed the null check
+    LazyWidget w([&] { sync.arrive_and_wait(); });
+
+    Widget* r1 = nullptr;
+    Widget* r2 = nullptr;
+    std::thread t1([&] { r1 = w.get(); });
+    std::thread t2([&] { r2 = w.get(); });
+    t1.join();
+    t2.join();
+
+    EXPECT_EQ(r1, r2);              // one published instance
+    EXPECT_EQ(w.discarded(), 1);    // the "lost CAS" path ran: every time, not 1 in 10^6
+}
+```
+
+If someone "simplifies" `get()` to `if (!p) { p = new Widget; ptr_.store(p); }`, this test fails **deterministically** (`r1 != r2`), not once a month. That is the point: a regression test for a race must reproduce the race on every run.
+
+Rules for seams:
+
+- The seam must sit **outside** any lock the other thread needs, or the barrier deadlocks the test (thread A waits at the barrier while holding the mutex; thread B blocks on the mutex and never reaches the barrier). If the code under test holds a lock at the interesting point, use a `std::latch` that the *main thread* counts down after it has observed the expected state, or test the locked region's contract instead.
+- Keep the seam cheap: an empty `std::function` check, or a compile-time policy, or `#ifdef`-ed out in release builds.
+- Name the seam after the *point*, not after the test ("after_check", "before_publish"), so it is reusable.
+
+## 40.4 Timeouts for Deadlock Detection
+
+GoogleTest has **no per-test timeout**. A deadlocked test hangs the binary until the CI job's global timeout kills it, with no indication of which test hung. Use two layers:
+
+1. **An outer timeout at the runner level** (always): `set_tests_properties(... PROPERTIES TIMEOUT 60)` or `gtest_discover_tests(... PROPERTIES TIMEOUT 60)`, `ctest --timeout 60`, or Bazel's `size`/`timeout`. CTest kills the process and reports *which* test timed out.
+2. **An inner timeout around the operation** when the test is specifically about liveness:
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <chrono>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+// Runs `fn` on a separate thread; fails (instead of hanging the whole suite)
+// if it does not finish in time. State must be owned by shared_ptr because a
+// hung thread is leaked and may outlive the test's stack frame.
+template <class Fn>
+::testing::AssertionResult CompletesWithin(std::chrono::milliseconds limit, Fn fn) {
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> fut = done->get_future();
+    std::thread([done, fn = std::move(fn)]() mutable {
+        fn();
+        done->set_value();
+    }).detach();
+    if (fut.wait_for(limit) == std::future_status::ready)
+        return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure()
+           << "did not finish within " << limit.count() << " ms (deadlock?)";
+}
+
+struct Account {
+    std::mutex m;
+    long balance = 1'000'000;
+};
+
+// Correct: std::scoped_lock acquires both mutexes with a deadlock-avoidance algorithm.
+// The classic bug is `std::lock_guard a(from.m); std::lock_guard b(to.m);`,
+// which deadlocks when two threads transfer in opposite directions.
+void Transfer(Account& from, Account& to, long amount) {
+    std::scoped_lock lk(from.m, to.m);
+    from.balance -= amount;
+    to.balance += amount;
+}
+
+TEST(Transfer, OppositeDirectionTransfersDoNotDeadlock) {
+    auto a = std::make_shared<Account>();
+    auto b = std::make_shared<Account>();
+    EXPECT_TRUE(CompletesWithin(std::chrono::seconds(10), [a, b] {
+        std::thread t1([&] { for (int i = 0; i < 100'000; ++i) Transfer(*a, *b, 1); });
+        std::thread t2([&] { for (int i = 0; i < 100'000; ++i) Transfer(*b, *a, 1); });
+        t1.join();
+        t2.join();
+    }));
+    EXPECT_EQ(a->balance + b->balance, 2'000'000);   // conservation invariant
+}
+```
+
+Why not `std::async(...).wait_for(...)`? Because the `std::future` returned by `std::async` **blocks in its destructor** until the task finishes. On timeout, the test reports a failure and then hangs anyway when the future goes out of scope. The detached-thread + `std::promise` pattern avoids that; the price is a leaked thread on timeout, which is acceptable because the process is already broken. In CI, pair this with `--gtest_break_on_failure` or an outer timeout that captures stacks (`gdb -batch -ex "thread apply all bt" -p <pid>`, or `timeout --signal=QUIT`) so you know *where* it hung.
+
+Choose generous limits (10-100x the normal runtime). Timeouts are for detecting "never finishes", not for performance assertions; tight limits make tests flaky on loaded CI machines and under sanitizers (TSan is 5-15x slower).
+
+## 40.5 Injectable Time: Fake Clocks
+
+Code that reads the clock (TTL caches, rate limiters, retry backoff, heartbeat/timeout detectors, sampling profilers) is untestable if it calls `std::chrono::steady_clock::now()` directly: tests must `sleep_for` real time, which makes them slow, and they still flake when the machine stalls. Inject the clock instead:
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <chrono>
+
+class Clock {
+public:
+    using time_point = std::chrono::steady_clock::time_point;
+    virtual ~Clock() = default;
+    virtual time_point now() const = 0;
+};
+
+class SteadyClock final : public Clock {     // production implementation
+public:
+    time_point now() const override { return std::chrono::steady_clock::now(); }
+};
+
+class FakeClock final : public Clock {       // test implementation
+public:
+    time_point now() const override { return now_; }
+    void advance(std::chrono::nanoseconds d) { now_ += d; }
+private:
+    time_point now_{};    // the test controls time completely
+};
+
+// Token bucket: `rate` tokens per second, burst capacity `burst`.
+class RateLimiter {
+public:
+    RateLimiter(const Clock& clock, double rate, double burst)
+        : clock_(clock), rate_(rate), burst_(burst), tokens_(burst), last_(clock.now()) {}
+
+    bool try_acquire() {
+        auto now = clock_.now();
+        std::chrono::duration<double> elapsed = now - last_;
+        last_ = now;
+        tokens_ = std::min(burst_, tokens_ + elapsed.count() * rate_);
+        if (tokens_ < 1.0) return false;
+        tokens_ -= 1.0;
+        return true;
+    }
+
+private:
+    const Clock& clock_;
+    double rate_, burst_, tokens_;
+    Clock::time_point last_;
+};
+
+TEST(RateLimiter, RefillsAtConfiguredRateWithoutSleeping) {
+    using namespace std::chrono_literals;
+    FakeClock clock;
+    RateLimiter rl(clock, /*rate=*/10.0, /*burst=*/2.0);
+
+    EXPECT_TRUE(rl.try_acquire());     // burst of 2
+    EXPECT_TRUE(rl.try_acquire());
+    EXPECT_FALSE(rl.try_acquire());    // empty
+
+    clock.advance(99ms);               // 0.99 tokens: still not enough
+    EXPECT_FALSE(rl.try_acquire());
+    clock.advance(1ms);                // 1.00 token
+    EXPECT_TRUE(rl.try_acquire());
+
+    clock.advance(1h);                 // capped at burst, not 36,000 tokens
+    EXPECT_TRUE(rl.try_acquire());
+    EXPECT_TRUE(rl.try_acquire());
+    EXPECT_FALSE(rl.try_acquire());
+}
+```
+
+The test runs in microseconds, checks exact boundaries (99 ms vs 100 ms), and tests a one-hour gap without waiting an hour.
+
+| Injection style | How | Trade-off |
+|---|---|---|
+| Virtual interface (above) | `const Clock&` constructor parameter | Simple, runtime-swappable; one virtual call per `now()` |
+| Template policy | `template <class Clock = std::chrono::steady_clock> class RateLimiter` with a static `Clock::now()` | Zero overhead; fake clock needs static/global state, so tests must reset it |
+| `std::function<time_point()>` | Pass a lambda | Flexible; easy to capture a test-local counter |
+| Link-time seam | Different `now()` implementation linked into tests | No code change; global, awkward with parallel tests |
+
+**Pitfalls**:
+
+- Use `steady_clock` for durations and timeouts, never `system_clock` (it can jump forwards or backwards on NTP step corrections or manual clock changes; DST does not affect it, but those steps do). Fake both if the code needs wall time for timestamps.
+- A fake clock fixes *reading* time but not *waiting* for it. Code that calls `cv.wait_for(lk, 5s)` or `sleep_for` still blocks in real time. For that, inject a scheduler/timer abstraction (`Sleeper::sleep_for` that the fake turns into "advance the clock and return"), or restructure into an event loop whose `tick(now)` method the test calls directly.
+- Do not mix: if production code reads both the injected clock and `steady_clock::now()` directly, the test sees an inconsistent world.
+
+## 40.6 TSan in CI, Repeat, and Shuffle
+
+ThreadSanitizer (Section 33.5) is the single most valuable tool for concurrent code. It instruments every memory access and uses **happens-before analysis**: it reports a race when two accesses (at least one a write) are not ordered by synchronization, *even if the bad outcome did not happen on this run*. It also has a **deadlock detector** that reports `lock-order-inversion (potential deadlock)` when it sees mutex A taken before B in one place and B before A in another, again without needing the deadlock to actually happen.
+
+A practical CI setup:
+
+```bash
+# Separate build tree: TSan cannot be combined with ASan/MSan.
+cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g -fno-omit-frame-pointer"
+cmake --build build-tsan
+
+# halt_on_error: fail the test at the first report; second_deadlock_stack: show both stacks.
+export TSAN_OPTIONS="halt_on_error=1 second_deadlock_stack=1"
+
+# Run concurrency-labelled tests repeatedly; stop as soon as one fails.
+ctest --test-dir build-tsan -L concurrency --repeat until-fail:20 \
+      --timeout 300 --output-on-failure
+
+# Or drive GoogleTest directly to hunt a flake:
+./build-tsan/tests --gtest_filter='*Stress*:*Race*' \
+    --gtest_repeat=200 --gtest_shuffle --gtest_break_on_failure
+```
+
+| Technique | What it finds | Cost |
+|---|---|---|
+| `--gtest_repeat=N` | Flaky failures that need many attempts | N x runtime |
+| `--gtest_shuffle` (+ printed `--gtest_random_seed`) | Hidden order dependencies between tests (shared static state) | ~free; reproduce with the printed seed |
+| `ctest --repeat until-fail:N` / `until-pass:N` | Same, at CTest level; `until-pass` is for quarantining known-flaky tests (use sparingly) | N x runtime |
+| `ctest --schedule-random` | Order dependencies between test *processes* | ~free |
+| TSan | Data races and lock-order inversions in executed code paths | 5-15x CPU, 5-10x memory |
+| Perturbation: `taskset -c 0` (force one core), `stress-ng --cpu N` in the background, `rr record --chaos` | Interleavings the idle scheduler never picks | Varies |
+
+TSan caveats worth knowing in an interview:
+
+- TSan only sees code paths that **execute**; pair it with stress tests that exercise the concurrent paths.
+- Uninstrumented code (prebuilt libraries, inline assembly, GPU runtimes) is invisible; races through it are missed or reported confusingly. GCC warns that `std::atomic_thread_fence` is not supported under `-fsanitize=thread`, so fence-based lock-free code can produce false reports.
+- Annotate intentional benign races only as a last resort (`__attribute__((no_sanitize("thread")))` or a suppressions file), and document why.
+
+> **See also:** [Cpp_Fundamentals -- Common Concurrency Bugs](Cpp_Fundamentals.md#127-common-concurrency-bugs) · [Concurrency coding problems](../computer-science/Concurrency_Coding_Problems.md) · [Debugging hangs with gdb](../tools/Debugging_and_Profiling_Tools.md) · [CMake sanitizer presets](../tools/CMake_Fundamentals.md#53-sanitizers)
+
+## 40.7 Interview Questions -- Concurrent Code
+
+**Q1. How would you test a thread-safe queue?**
+
+A: Three layers. (1) Sequential unit tests for the contract (FIFO order, `pop` on a closed empty queue returns `nullopt`, `close` wakes blocked consumers). (2) A stress test: M producers and N consumers released together by a `std::latch`, each producer pushing a disjoint range of values; after joining, assert the invariant that every value was popped exactly once (catches lost wake-ups, double delivery, and lost items). (3) Run the stress test under TSan in CI and with `--gtest_repeat` locally. If a specific bug was found (e.g., a lost wake-up when `notify_one` is called outside the lock in a particular order), add a deterministic regression test using a seam and a latch/barrier so the interleaving is forced.
+
+**Q2. Why is a `std::latch` "start gun" important in stress tests?**
+
+A: Thread creation takes on the order of 10-50 microseconds. Without a latch, thread 1 may finish its entire workload before thread 8 is even created, so the test exercises almost no contention and passes trivially. With all threads blocked at `arrive_and_wait()`, they start within microseconds of each other and actually collide.
+
+**Q3. Your test passes locally 1,000 times but fails about once a week in CI. What do you do?**
+
+A: First, make it reproducible: get the seed from the log (`--gtest_random_seed`) and rerun with `--gtest_repeat=10000 --gtest_break_on_failure`, ideally under TSan, and with perturbation (`taskset -c 0`, background CPU load, `rr record --chaos`). CI machines are more loaded and have different core counts, so imitate that. Second, check for non-concurrency causes of flakiness: wall-clock sleeps, real time, shared temp files or ports, test-order dependence (`--gtest_shuffle`). Third, once the race is understood, write a deterministic test with a seam and a barrier that reproduces it 100% of the time, fix the bug, and keep the test. Do not "fix" it by increasing a sleep.
+
+**Q4. How do you test for deadlock freedom?**
+
+A: You cannot prove it with tests, but you can (a) run a workload that would deadlock under the classic bug (opposite-order lock acquisition from two threads) with a timeout wrapper so a hang becomes a failure; (b) rely on TSan's lock-order-inversion detector, which flags A-then-B vs B-then-A ordering even if the deadlock never occurred in that run; (c) set CTest `TIMEOUT` so any hang is reported with the test name; (d) on failure, capture all thread stacks (`gdb -p PID -batch -ex "thread apply all bt"`). Design-level fixes (lock ordering, `std::scoped_lock`, never calling callbacks under a lock) matter more than tests.
+
+**Q5. Why not use `std::async` with `wait_for` as a test timeout?**
+
+A: A `std::future` obtained from `std::async` joins the task in its destructor. If the task is deadlocked, `wait_for` returns `timeout`, you record a failure, and then the destructor hangs forever. Use a detached thread plus `std::promise`, keep all shared state in `shared_ptr`, and accept a leaked thread on failure (or `std::abort()` to get a core dump).
+
+**Q6. How do you test code that uses timeouts or TTLs without sleeping?**
+
+A: Inject time. Pass a `Clock` interface (or template policy) into the component; production uses `steady_clock`, tests use a `FakeClock` with `advance()`. The test then checks exact boundaries ("expires at 30.000 s, not 29.999 s") in microseconds. If the code also *waits* (condition variable with timeout, retry backoff), inject a timer/scheduler abstraction too, or restructure the logic into a `tick(now)` state machine that the test drives directly.
+
+**Q7. Can TSan miss races? Can it report false positives?**
+
+A: It misses races on code paths not executed in that run, races through uninstrumented code (libraries, assembly, GPU), and races whose two accesses are too far apart in time (TSan keeps a bounded history per memory location). False positives are rare and usually come from synchronization TSan cannot see: standalone `atomic_thread_fence`, custom futex-based primitives, or synchronization inside uninstrumented libraries. Treat every report as real until proven otherwise.
+
+**Q8. What is a test seam, and what is the risk of adding one for concurrency tests?**
+
+A: A seam is a point where a test can alter behavior without editing the code under test (Section 37.3) -- here, a hook between "check" and "act" where a test can block threads. Risks: the hook can perturb the timing it is meant to probe (keep it a no-op when unset); a hook placed while holding a lock can deadlock the test itself; and hooks leak test concerns into production code (mitigate with a compile-time policy or `#ifdef`, and name hooks after code locations).
+
+---
+
+# 41. Testing GPU / HIP Code
+
+## 41.1 What Is Different About GPU Tests
+
+| Concern | CPU unit test | GPU kernel test |
+|---|---|---|
+| Oracle | Hand-computed expected value | A **host reference implementation** run on the same inputs |
+| Equality | Usually exact | Floating-point results legitimately differ (FMA contraction, reduction order, fast-math intrinsics, denormal flushing) -- compare **with a tolerance** |
+| Environment | Always available | Device may be absent (developer laptop, CPU-only CI runner) -- **skip, don't fail** (but see the pitfall in 41.3) |
+| Errors | Exceptions / return values | Launch errors are reported by `hipGetLastError()`; execution errors surface **asynchronously** at the next synchronizing call |
+| Size coverage | One or two cases | Edge sizes (1, block-1, block, block+1, non-multiples) **and** sizes large enough to use many blocks / exceed caches |
+| Parallel test runs | Cheap | Device memory and compute are shared resources -- use CTest resource groups or one GPU per job |
+
+The core pattern is **differential testing**: generate inputs with a fixed seed, run the kernel, run a simple, obviously-correct host implementation, and compare element by element with a tolerance justified by the numerics.
+
+## 41.2 A Complete HIP + GoogleTest Example
+
+The program below (compiled with `hipcc -std=c++20 ... -lgtest_main -lgtest`) shows every piece: an error-checking macro usable inside tests, RAII device buffers, a fixture that skips when no device is visible, value-parameterized size sweeps, an `AllClose` predicate with rtol/atol and ULP diagnostics, a reduction tested against a double-precision reference with an error bound, and a launch-error test.
+
+```cpp
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <random>
+#include <sstream>
+#include <vector>
+
+// ---------- error checking usable inside TEST bodies ----------
+#define HIP_ASSERT(expr)                                                  \
+    do {                                                                  \
+        hipError_t err_ = (expr);                                         \
+        ASSERT_EQ(err_, hipSuccess)                                       \
+            << #expr << " -> " << hipGetErrorName(err_) << ": "           \
+            << hipGetErrorString(err_);                                   \
+    } while (0)
+
+// ---------- kernels under test ----------
+__global__ void saxpy(int n, float a, const float* x, float* y) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) y[i] = a * x[i] + y[i];
+}
+
+__global__ void block_sum(int n, const float* in, float* partial) {
+    extern __shared__ float s[];
+    int tid = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + tid;
+    s[tid] = (i < n) ? in[i] : 0.0f;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (tid < stride) s[tid] += s[tid + stride];
+        __syncthreads();
+    }
+    if (tid == 0) partial[blockIdx.x] = s[0];
+}
+
+// ---------- RAII device buffer so ASSERT early-returns don't leak ----------
+template <class T>
+class DeviceBuffer {
+public:
+    explicit DeviceBuffer(size_t n) : n_(n) {
+        if (hipMalloc(&p_, n * sizeof(T)) != hipSuccess) p_ = nullptr;
+    }
+    ~DeviceBuffer() { if (p_) (void)hipFree(p_); }
+    DeviceBuffer(const DeviceBuffer&) = delete;
+    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+    T* get() const { return p_; }
+    size_t bytes() const { return n_ * sizeof(T); }
+private:
+    T* p_ = nullptr;
+    size_t n_;
+};
+
+// ---------- comparison helpers ----------
+// Map float bits onto a monotonically ordered integer line (+0 and -0 -> 0).
+inline int64_t OrderedBits(float f) {
+    int32_t i = std::bit_cast<int32_t>(f);
+    return i < 0 ? int64_t{std::numeric_limits<int32_t>::min()} - i : i;
+}
+inline int64_t UlpDistance(float a, float b) {
+    return std::llabs(OrderedBits(a) - OrderedBits(b));
+}
+
+// numpy.isclose-style: |actual - expected| <= atol + rtol * |expected|
+::testing::AssertionResult AllClose(const std::vector<float>& actual,
+                                    const std::vector<float>& expected,
+                                    float rtol, float atol,
+                                    int max_reported = 5) {
+    if (actual.size() != expected.size())
+        return ::testing::AssertionFailure() << "size mismatch";
+    size_t bad = 0;
+    std::ostringstream os;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        float a = actual[i], e = expected[i];
+        bool ok = std::isnan(e) ? std::isnan(a)
+                                : std::fabs(a - e) <= atol + rtol * std::fabs(e);
+        if (!ok && bad++ < static_cast<size_t>(max_reported))
+            os << "\n  [" << i << "] actual=" << a << " expected=" << e
+               << " ulps=" << UlpDistance(a, e);
+    }
+    if (bad == 0) return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure()
+           << bad << " of " << actual.size() << " elements differ" << os.str();
+}
+
+// ---------- fixture: skip cleanly when there is no GPU ----------
+class HipTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        int count = 0;
+        if (hipGetDeviceCount(&count) != hipSuccess || count == 0)
+            GTEST_SKIP() << "no HIP device visible";
+        HIP_ASSERT(hipSetDevice(0));
+    }
+    void TearDown() override {
+        // Surface asynchronous errors from THIS test here, not in the next one.
+        // TearDown also runs after GTEST_SKIP, so re-check for a device.
+        int count = 0;
+        if (hipGetDeviceCount(&count) == hipSuccess && count > 0)
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+    std::mt19937 rng{12345};   // fixed seed: failures are reproducible
+};
+
+class SaxpyTest : public HipTest, public ::testing::WithParamInterface<int> {};
+
+TEST_P(SaxpyTest, MatchesHostReference) {
+    const int n = GetParam();
+    const float a = 2.5f;
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> x(n), y(n);
+    for (auto& v : x) v = dist(rng);
+    for (auto& v : y) v = dist(rng);
+
+    std::vector<float> ref(n);                 // host reference, same precision
+    for (int i = 0; i < n; ++i) ref[i] = a * x[i] + y[i];
+
+    DeviceBuffer<float> dx(n), dy(n);
+    ASSERT_NE(dx.get(), nullptr);
+    ASSERT_NE(dy.get(), nullptr);
+    HIP_ASSERT(hipMemcpy(dx.get(), x.data(), dx.bytes(), hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dy.get(), y.data(), dy.bytes(), hipMemcpyHostToDevice));
+
+    const int block = 256;
+    const int grid = (n + block - 1) / block;
+    saxpy<<<grid, block>>>(n, a, dx.get(), dy.get());
+    HIP_ASSERT(hipGetLastError());             // launch-configuration errors
+    HIP_ASSERT(hipDeviceSynchronize());        // execution errors
+
+    std::vector<float> out(n);
+    HIP_ASSERT(hipMemcpy(out.data(), dy.get(), dy.bytes(), hipMemcpyDeviceToHost));
+
+    // The device may fuse a*x+y into one FMA (one rounding) while the host
+    // rounds twice: allow ~1-2 ULP of relative error, plus a tiny atol for
+    // results that cancel to near zero (where relative error is meaningless).
+    EXPECT_TRUE(AllClose(out, ref, /*rtol=*/2e-7f, /*atol=*/1e-6f));
+}
+
+// Small sizes hit the edges (n < block, n not a multiple of block);
+// the large size exercises thousands of blocks.
+INSTANTIATE_TEST_SUITE_P(Sizes, SaxpyTest,
+                         ::testing::Values(1, 63, 64, 65, 255, 256, 257,
+                                           1000, 1 << 20));
+
+TEST_F(HipTest, BlockSumMatchesDoubleReferenceWithinErrorBound) {
+    const int n = 1 << 20, block = 256, grid = (n + block - 1) / block;
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    std::vector<float> x(n);
+    for (auto& v : x) v = dist(rng);
+
+    DeviceBuffer<float> din(n), dpart(grid);
+    ASSERT_NE(din.get(), nullptr);
+    ASSERT_NE(dpart.get(), nullptr);
+    HIP_ASSERT(hipMemcpy(din.get(), x.data(), din.bytes(), hipMemcpyHostToDevice));
+    block_sum<<<grid, block, block * sizeof(float)>>>(n, din.get(), dpart.get());
+    HIP_ASSERT(hipGetLastError());
+    std::vector<float> part(grid);
+    HIP_ASSERT(hipMemcpy(part.data(), dpart.get(), dpart.bytes(), hipMemcpyDeviceToHost));
+
+    double gpu = 0.0;                          // finish the reduction on the host
+    for (float p : part) gpu += p;
+    double ref = 0.0, abs_sum = 0.0;           // double-precision reference
+    for (float v : x) { ref += v; abs_sum += std::fabs(v); }
+
+    // Tree reduction of depth log2(block): |error| <~ log2(block) * eps * sum|x|.
+    const double bound = 2.0 * std::log2(block) *
+                         std::numeric_limits<float>::epsilon() * abs_sum;
+    EXPECT_NEAR(gpu, ref, bound);
+}
+
+TEST_F(HipTest, InvalidLaunchConfigurationIsReported) {
+    DeviceBuffer<float> d(1);
+    ASSERT_NE(d.get(), nullptr);
+    // 2048 threads per block exceeds the 1024 limit on current AMD GPUs.
+    saxpy<<<1, 2048>>>(1, 1.0f, d.get(), d.get());
+    EXPECT_EQ(hipGetLastError(), hipErrorInvalidConfiguration);
+    EXPECT_EQ(hipGetLastError(), hipSuccess);  // hipGetLastError() resets the error
+}
+
+TEST(UlpTest, DistanceHandlesNeighboursAndSignedZero) {
+    EXPECT_EQ(UlpDistance(1.0f, std::nextafter(1.0f, 2.0f)), 1);
+    EXPECT_EQ(UlpDistance(0.0f, -0.0f), 0);
+    EXPECT_EQ(UlpDistance(-std::numeric_limits<float>::denorm_min(),
+                          std::numeric_limits<float>::denorm_min()), 2);
+}
+```
+
+Running it with no visible device (`HIP_VISIBLE_DEVICES=-1 ./gpu_test`) makes `hipGetDeviceCount` return `hipErrorNoDevice`, so every `HipTest`-derived test is reported as `[  SKIPPED ]` while the pure-host `UlpTest` still runs. That is also how to test the skip path itself on a GPU machine.
+
+## 41.3 Skipping When There Is No Device
+
+- `GTEST_SKIP()` in a fixture's `SetUp()` skips the test body; `TearDown()` **still runs**, so it must not assume the device was initialized (note the re-check above).
+- `GTEST_SKIP()` in a global `::testing::Environment::SetUp()` skips **every** test in the binary.
+- `gtest_discover_tests` sets `SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"`, so CTest reports these as *skipped*, not passed (Section 29).
+
+**Pitfall: silent green on a GPU runner.** If the GPU CI job's container is missing `--device=/dev/kfd --device=/dev/dri`, or `HIP_VISIBLE_DEVICES` is wrong, every GPU test skips and the job is green. When skipping happens in a global environment, the GoogleTest summary even says `[  PASSED  ] N tests` with no skipped list. Guard against it: on GPU runners set an environment variable such as `REQUIRE_GPU=1` and turn the skip into a failure:
+
+```cpp
+// fragment -- inside HipTest::SetUp()
+if (hipGetDeviceCount(&count) != hipSuccess || count == 0) {
+    if (std::getenv("REQUIRE_GPU")) FAIL() << "REQUIRE_GPU set but no HIP device visible";
+    GTEST_SKIP() << "no HIP device visible";
+}
+```
+
+## 41.4 Choosing Tolerances: rtol, atol, and ULPs
+
+Why GPU and CPU results differ even for "the same" code:
+
+| Source of difference | Typical size | Example |
+|---|---|---|
+| FMA contraction (`a*b+c` rounded once vs twice) | <= 1 ULP per operation | saxpy, GEMM inner loops; hipcc contracts by default |
+| Reduction order (tree vs sequential) | Grows with n: ~log2(n) x eps x sum\|x\| for a tree, up to ~n x eps x sum\|x\| sequentially | sum, dot, norm, softmax denominators, GEMM with split-K |
+| Fast intrinsics (`__expf`, `__fdividef`, `-ffast-math`) | Several ULP to much more near edge cases | activation functions |
+| Denormal flushing (FTZ/DAZ) | Results near 1e-38 become 0 | underflow-heavy data |
+| Lower precision (FP16/BF16/FP8, matrix cores) | eps(bf16) = 2^-7 ~ 7.8e-3; eps(fp16) = 2^-10 ~ 9.8e-4 | mixed-precision GEMM accumulating in FP32 |
+| Atomics (`atomicAdd` on floats) | Nondeterministic order: results differ **run to run** | histogram, scatter-add |
+
+The three comparison styles:
+
+| Style | Check | Use when | Weakness |
+|---|---|---|---|
+| Absolute (`atol`) | \|a - e\| <= atol | Values near zero; known absolute error budget | Meaningless for large magnitudes |
+| Relative (`rtol`) | \|a - e\| <= rtol x \|e\| | Values of varying magnitude | Breaks down when `e` ~ 0 (cancellation) |
+| ULP distance | ordered-bits(a) - ordered-bits(b) <= k | Elementwise ops where you can bound rounding steps (e.g., "<= 2 ULP for `expf`") | Huge for values near zero after cancellation; not meaningful across precisions |
+| Combined (numpy `isclose`) | \|a - e\| <= atol + rtol x \|e\| | Default choice for kernel tests | Need to pick two numbers |
+
+Worked numbers for FP32 (eps = 2^-23 ~ 1.19e-7; 1 ULP at 1.0 = eps):
+
+- **Elementwise** kernel (saxpy): one rounding difference -> rtol ~ 2e-7 (about 2 ULP near 1.0). If you need `rtol = 1e-3` for saxpy, something is wrong.
+- **Reduction** of n = 2^20 values in [0, 1): sum ~ 5.2e5. A 256-wide tree has depth 8, so bound ~ 2 x 8 x 1.19e-7 x 5.2e5 ~ 1.0 absolute (about 2e-6 relative). A naive sequential float sum on the host could be off by much more -- which is why the **reference is computed in double**.
+- **GEMM** with K = 4096 in FP32: per-element error ~ sqrt(K) x eps x sum\|a_ik b_kj\| on average (worst case K x eps x ...). Use a tolerance that scales with K, not a constant.
+- **BF16 inputs with FP32 accumulate**: the input rounding dominates: rtol ~ 1e-2, compare against an FP32/FP64 reference computed from the *already-rounded* BF16 inputs so you test the kernel, not the quantization.
+
+Rules of thumb:
+
+1. Compute the reference in **higher precision** (double for FP32 kernels) from the **same** inputs.
+2. Derive the tolerance from the algorithm (number of rounding steps, reduction depth, input precision) and **write the derivation in a comment**. A magic `1e-3` hides bugs.
+3. Report **the first few mismatches with index, values, and ULP distance** and a count, not a million `EXPECT_NEAR` failures (the `AllClose` predicate above).
+4. Add an **exact** test where possible: integer kernels, permutations, copy/transposes, and floats that are exactly representable (small integers summed in FP32 are exact up to 2^24).
+5. Test special values explicitly: NaN propagation, +-Inf, -0.0, denormals, empty inputs.
+
+## 41.5 Testing Launch and Runtime Errors
+
+| Error class | When it is reported | How to test |
+|---|---|---|
+| Invalid launch configuration (block > 1024 threads, zero-size grid or block) | Immediately: `hipGetLastError()` after the launch returns `hipErrorInvalidConfiguration` | Launch with a bad config and `EXPECT_EQ(hipGetLastError(), hipErrorInvalidConfiguration)` (shown above) |
+| Too much dynamic shared memory | At launch: an error from `hipGetLastError()` (the exact code can differ between ROCm versions) | `EXPECT_NE(hipGetLastError(), hipSuccess)` |
+| API misuse (bad pointer to `hipMemcpy`, invalid device ordinal) | Return value of the API call | `EXPECT_EQ(hipSetDevice(999), hipErrorInvalidDevice)` |
+| Faults inside a kernel (out-of-bounds, illegal address) | **Asynchronously**, at the next synchronizing call; may kill the process or leave the context unusable | Do **not** unit-test by causing them; use bounds checks in kernels under test builds, AddressSanitizer for device code where supported (xnack+ GPUs), and `AMD_SERIALIZE_KERNEL=3` / `HIP_LAUNCH_BLOCKING=1`-style serialization while debugging |
+| Your library's own validation (null pointers, n < 0, misaligned buffers) | Your API's return code / exception | Ordinary unit tests -- this is where most error-path tests belong |
+
+Notes:
+
+- `hipGetLastError()` returns **and resets** the last error; `hipPeekAtLastError()` returns it without resetting. Call one of them right after every launch in tests; otherwise a launch error is silently reported by some later, unrelated call.
+- Always `hipDeviceSynchronize()` (or `hipStreamSynchronize`) before reading results **and** at the end of each test (fixture `TearDown`), so an asynchronous fault is attributed to the right test.
+- A fatal device fault may abort the process. Put tests that intentionally crash into a **death test** (`EXPECT_DEATH`) or a separate binary, and initialize the GPU runtime *inside* the death-test statement (death tests fork; a forked child must not reuse the parent's GPU context).
+
+## 41.6 Deterministic Seeds and Size Selection
+
+- **Fixed seeds**: `std::mt19937 rng{12345}`. The C++ standard fixes the output sequence of `std::mt19937`, but **distributions** (`uniform_real_distribution`, `normal_distribution`) are implementation-defined, so the same seed can produce different inputs on libstdc++ vs libc++ vs MSVC. For cross-platform reproducibility, generate values yourself from raw `rng()` output (e.g., `(rng() >> 8) * 0x1p-24f` for [0,1) floats) or store input files.
+- **Log the seed** on failure (`SCOPED_TRACE("seed=" + std::to_string(seed))`) if you randomize it per run, so the failing case is reproducible.
+- **Size sweep** -- each size targets a specific bug class:
+
+| Size | Catches |
+|---|---|
+| 0 (if allowed) | Launching a zero-size grid (an error), division by zero in grid math |
+| 1 | Reductions that assume >= 2 elements; uninitialized shared memory in idle threads |
+| block - 1, block, block + 1 | Missing `if (i < n)` guard; off-by-one in grid computation |
+| warp/wavefront size +- 1 (64 on CDNA, 32 on RDNA/NVIDIA) | Wavefront-level reductions and shuffles assuming full waves |
+| Non-power-of-two (1000, 1023) | Tree reductions assuming powers of two |
+| Large (2^20 - 2^26) | Grid-stride loops, multiple blocks, accumulated FP error, timeouts |
+| Very large (> 2^31 elements or bytes) | 32-bit index overflow (`int i = blockIdx.x * blockDim.x + threadIdx.x` overflows) -- run nightly, memory permitting |
+
+Keep the small cases in the per-PR suite (milliseconds); put the very large ones behind a label (`ctest -L gpu-large`) for nightly runs.
+
+## 41.7 GPU Tests in CI
+
+- **Resource scheduling**: tell CTest how many GPUs exist and how many each test needs, so `ctest -j` does not oversubscribe device memory:
+
+```cmake
+# fragment
+set_tests_properties(gpu_tests PROPERTIES RESOURCE_GROUPS "gpus:1" LABELS "gpu")
+# ctest --resource-spec-file gpus.json -j 8   -> sets CTEST_RESOURCE_GROUP_0_GPUS=id:N,slots:1
+# A small wrapper maps that id to HIP_VISIBLE_DEVICES before running the test.
+```
+
+- **Labels**: `gpu`, `gpu-large`, `multi-gpu`; CPU-only runners run `ctest -LE gpu`.
+- **Containers**: ROCm containers need `--device=/dev/kfd --device=/dev/dri` (and typically `--group-add video`); see [Containers and CI](../tools/Containers_and_CI.md).
+- **Determinism**: avoid float atomics in kernels you want bitwise-reproducible tests for, or compare with a tolerance that covers reorderings.
+- **Host-side sanitizers**: ASan/UBSan on the host code of a HIP program generally works; TSan with GPU runtimes is noisy. Device-side ASan is a separate ROCm feature with its own requirements -- check the documentation for your ROCm version.
+
+> **See also:** [GPU error-checking macros](../ml-gpu/Parallel_GPU_Programming.md#244-error-handling) · [HIP streams and events](../ml-gpu/Parallel_GPU_Programming.md#28-hip-streams-events-and-synchronization) · [AMD GPU architecture and profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md) · [GPU kernel case studies](../ml-gpu/GPU_Kernel_Case_Studies.md) · [CMake test properties](../tools/CMake_Fundamentals.md#43-test-properties)
+
+## 41.8 Interview Questions -- GPU Code
+
+**Q1. How do you know a GPU kernel is correct?**
+
+A: Differential testing against a host reference. Generate inputs with a fixed seed, run the kernel and a simple, obviously-correct host implementation (in higher precision, e.g., double for FP32), and compare with a tolerance derived from the numerics. Sweep sizes that target bug classes (1, block +- 1, wavefront +- 1, non-powers-of-two, large), include special values (NaN, Inf, -0.0, denormals), and include exact cases (integers, permutations) where any difference is a bug. Check `hipGetLastError()` after launches and synchronize before reading results.
+
+**Q2. Why can't you use `EXPECT_EQ` or `EXPECT_FLOAT_EQ` for GPU results?**
+
+A: `EXPECT_EQ` requires bitwise-equal values, but the GPU may fuse multiply-adds, reduce in a different order, flush denormals, or use faster transcendental approximations, all of which legitimately change the last bits. `EXPECT_FLOAT_EQ` allows 4 ULP, which is right for a single elementwise operation but far too tight for reductions (error grows with n) and meaningless for values that cancel to near zero. Use a combined `atol + rtol x |expected|` check whose parameters come from an error analysis.
+
+**Q3. What tolerance would you use for a sum of 1M FP32 values?**
+
+A: Derive it. With a tree reduction of depth d, the error bound is about d x eps x sum|x_i|. For 2^20 values in [0,1), sum|x| ~ 5.2e5, eps ~ 1.2e-7; a 256-wide block tree (d = 8) plus a host finish gives a bound of order 1 in absolute terms, i.e., ~2e-6 relative. I would compute the reference in double, use a bound of 2 x d x eps x sum|x|, and document the derivation. If the kernel uses float atomics across blocks, the order is nondeterministic and the bound has to cover the worst order.
+
+**Q4. How do you make GPU tests behave on machines without a GPU?**
+
+A: Check `hipGetDeviceCount` in the fixture's `SetUp()` and call `GTEST_SKIP()` with a reason. CTest then reports the test as skipped (via `SKIP_REGULAR_EXPRESSION`, which `gtest_discover_tests` sets). On GPU runners, set `REQUIRE_GPU=1` and turn the skip into a failure, because a misconfigured container (missing `/dev/kfd`) would otherwise make the whole GPU suite "pass" by skipping.
+
+**Q5. How do you test that a kernel launch with an invalid configuration is reported?**
+
+A: Launch it (e.g., 2048 threads per block) and assert `hipGetLastError() == hipErrorInvalidConfiguration`, then assert that a second `hipGetLastError()` returns `hipSuccess` (the call resets the error). For faults *inside* kernels, do not provoke them in normal tests: they are asynchronous, may corrupt the context, and can abort the process. Use bounds-checked debug builds, device-side sanitizers, and death tests in a separate process if you must.
+
+**Q6. Your GPU test passes on MI300 and fails on a different GPU. What could be different?**
+
+A: Wavefront size (64 vs 32) if the kernel uses shuffles or assumes a wave width; LDS size limits; different FMA/denormal defaults or intrinsics accuracy; different numbers of CUs changing the grid-dependent reduction order; driver/compiler version; and memory model differences (e.g., missing fences that happened to work on one architecture). Reproduce with the fixed seed, print the first mismatches with ULP distances, and check whether the failure is "slightly over tolerance" (numerics) or "wildly wrong" (a race or an indexing bug).
+
+**Q7. How do you keep GPU tests fast enough for every PR?**
+
+A: Small sizes (kilobytes, not gigabytes) for the per-PR suite; reuse one device context per process (fixtures share it; avoid `hipDeviceReset()` between tests); batch many small cases into one launch where possible; label large sizes and multi-GPU tests for nightly runs; and schedule with CTest resource groups so several test processes share the GPUs without oversubscribing memory.
+
+---
+
+# 42. Golden-File, Snapshot, and Approval Testing
+
+## 42.1 Terminology
+
+All three names describe the same idea: **the expected output is stored in a file next to the test, and the test compares the actual output against it.** The differences are mostly about workflow:
+
+| Name | Typical origin | Where the expected output lives | How it is updated |
+|---|---|---|---|
+| Golden file / golden master | Compilers, tools, Go (`-update` flag) | `testdata/*.golden` checked into the repo | Rerun with an update flag; review the diff in code review |
+| Snapshot test | Jest, insta (Rust), syrupy (Python) | `__snapshots__/` files or inline in the test source | Tool command accepts new snapshots |
+| Approval test | ApprovalTests (C++ and others) | `*.approved.txt`; failures write `*.received.txt` | A human "approves" by copying received -> approved, often via a diff tool |
+
+They are a good fit when the output is **large, structured, and reviewed by humans**: compiler diagnostics, code generators, pretty-printers, CLI output, and -- directly relevant to profiler tooling -- **report tables, CSV/JSON exports, and analysis summaries** (e.g., a rocprof-compute analysis report for a recorded workload). Writing hundreds of `EXPECT_EQ`s for such output is impractical; a golden file captures all of it and a diff shows exactly what changed.
+
+They are a bad fit when the output is small (just assert it), highly nondeterministic, or when the test would only ever be "updated to whatever the code does now" without review (then it tests nothing).
+
+## 42.2 Normalization: Making Output Comparable
+
+Real tool output contains fields that legitimately change on every run. Normalize them to stable placeholders **before** comparing (and before writing the golden):
+
+| Nondeterministic field | Normalize to | Notes |
+|---|---|---|
+| Timestamps, dates, durations | `<TIMESTAMP>`, `<DURATION>` | Better: inject a fake clock (Section 40.5) so the value is fixed at the source |
+| Hostname, user name, PID, TID | `<HOST>`, `<PID>` | Or pass them in as parameters |
+| Absolute paths, temp directories | `<TMPDIR>`, `<SRC>` | Normalize path separators on Windows |
+| Pointer values / addresses | `<ADDR>` | Appear in debug dumps and kernel object handles |
+| Tool/library/driver versions, GPU name | `<VERSION>`, `<GPU>` | Keep the field present so its *position* is still tested |
+| Unordered containers (`std::unordered_map` iteration) | Sort the output | Better: sort in the code under test if output order is user-visible |
+| Floating-point measurements (timings, counter-derived metrics) | Round, or compare numerically with a tolerance | See 42.4; do not put raw timings in a golden |
+| Line endings, trailing whitespace | `\n`, trimmed | Configure `.gitattributes` (`*.golden -text` or `eol=lf`) |
+
+**Prefer determinism at the source over regex scrubbing.** Every regex is a place where a real regression can hide (e.g., a rule that maps every number to `<N>` would hide a wrong counter value). Scrub only the fields that are genuinely run-dependent, and test the normalizer itself.
+
+## 42.3 A Complete Golden-File Helper for GoogleTest
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <regex>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#ifndef TESTDATA_DIR
+// CMake: target_compile_definitions(t PRIVATE TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+#define TESTDATA_DIR "testdata"
+#endif
+
+namespace fs = std::filesystem;
+
+// ---------------- code under test: a tiny "profiler report" ----------------
+struct KernelStat {
+    std::string name;
+    int calls;
+    double total_ns;
+};
+
+std::string RenderReport(const std::vector<KernelStat>& stats, const std::string& host,
+                         int pid, const std::string& timestamp, const std::string& out_dir) {
+    std::ostringstream os;
+    os << "# generated " << timestamp << " on " << host << " pid=" << pid << "\n";
+    os << "# output: " << out_dir << "/results.csv\n";
+    os << "Kernel,Calls,TotalNs,MeanNs\n";
+    for (const auto& s : stats)
+        os << s.name << ',' << s.calls << ',' << s.total_ns << ','
+           << s.total_ns / s.calls << '\n';
+    return os.str();
+}
+
+// ---------------- golden-file helpers ----------------
+// Replace fields that legitimately change run-to-run with stable placeholders.
+std::string Normalize(std::string s) {
+    static const std::vector<std::pair<std::regex, std::string>> rules = {
+        {std::regex(R"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?)"), "<TIMESTAMP>"},
+        {std::regex(R"(pid=\d+)"), "pid=<PID>"},
+        {std::regex(R"( on [A-Za-z0-9._-]+)"), " on <HOST>"},
+        {std::regex(R"(0x[0-9a-fA-F]+)"), "<ADDR>"},
+        {std::regex(R"(/tmp/[^\s/]+)"), "<TMPDIR>"},
+        {std::regex(R"(\r\n)"), "\n"},
+    };
+    for (const auto& [re, repl] : rules) s = std::regex_replace(s, re, repl);
+    return s;
+}
+
+std::string ReadFile(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::ostringstream os;
+    os << in.rdbuf();
+    return os.str();
+}
+
+// Success, or a failure naming the first differing line. With UPDATE_GOLDEN=1
+// the golden is rewritten instead -- the diff is then reviewed in the PR.
+::testing::AssertionResult MatchesGolden(const std::string& raw_actual, const fs::path& golden) {
+    const std::string actual = Normalize(raw_actual);
+    if (const char* u = std::getenv("UPDATE_GOLDEN"); u && std::string(u) == "1") {
+        fs::create_directories(golden.parent_path());
+        std::ofstream(golden, std::ios::binary) << actual;
+        return ::testing::AssertionSuccess() << "golden updated: " << golden.string();
+    }
+    if (!fs::exists(golden))
+        return ::testing::AssertionFailure()
+               << "missing golden " << golden.string() << " (run with UPDATE_GOLDEN=1)";
+    const std::string expected = ReadFile(golden);
+    if (actual == expected) return ::testing::AssertionSuccess();
+
+    fs::path actual_path = golden;
+    actual_path += ".actual";                  // left on disk for `diff -u`
+    std::ofstream(actual_path, std::ios::binary) << actual;
+
+    std::istringstream a(actual), e(expected);
+    std::string la, le;
+    for (int line = 1;; ++line) {
+        bool ga = static_cast<bool>(std::getline(a, la));
+        bool ge = static_cast<bool>(std::getline(e, le));
+        if (!ga && !ge) break;
+        if (!ga || !ge || la != le)
+            return ::testing::AssertionFailure()
+                   << golden.string() << ":" << line << " differs\n  expected: "
+                   << (ge ? le : "<EOF>") << "\n  actual:   " << (ga ? la : "<EOF>")
+                   << "\n  diff -u " << golden.string() << " " << actual_path.string();
+    }
+    return ::testing::AssertionFailure() << "files differ only in trailing bytes";
+}
+
+TEST(ReportGolden, KernelSummaryMatchesGolden) {
+    std::vector<KernelStat> stats = {{"gemm_f16", 4, 12000.0}, {"softmax", 8, 800.0}};
+    std::string report = RenderReport(stats, "node017.cluster", 4242,
+                                      "2026-11-03T10:15:42.123Z", "/tmp/rocprof_abc123");
+    EXPECT_TRUE(MatchesGolden(report, fs::path(TESTDATA_DIR) / "kernel_summary.golden"));
+}
+
+TEST(ReportGolden, NormalizationIsStable) {
+    // The same logical report from two "runs" must normalize identically.
+    std::vector<KernelStat> stats = {{"k", 1, 10.0}};
+    EXPECT_EQ(Normalize(RenderReport(stats, "a", 1, "2026-01-01T00:00:00Z", "/tmp/x1")),
+              Normalize(RenderReport(stats, "b", 99, "2026-12-31T23:59:59.9Z", "/tmp/y2")));
+}
+```
+
+The generated `testdata/kernel_summary.golden`:
+
+```text
+# generated <TIMESTAMP> on <HOST> pid=<PID>
+# output: <TMPDIR>/results.csv
+Kernel,Calls,TotalNs,MeanNs
+gemm_f16,4,12000,3000
+softmax,8,800,100
+```
+
+And a failure after someone changes the call count (GoogleTest prints the condition after macro expansion, so `TESTDATA_DIR` appears as its value -- `"testdata"` here, or the absolute path when CMake defines it):
+
+```text
+Value of: MatchesGolden(report, fs::path("testdata") / "kernel_summary.golden")
+  Actual: false (testdata/kernel_summary.golden:5 differs
+  expected: softmax,9,800,100
+  actual:   softmax,8,800,100
+  diff -u testdata/kernel_summary.golden testdata/kernel_summary.golden.actual)
+Expected: true
+```
+
+## 42.4 Numeric Columns: Compare Structurally, Not Textually
+
+For profiler output, many columns are **measured** (durations, bandwidth, derived metrics such as "% of peak"). Do not snapshot them as text. Options, in order of preference:
+
+1. **Make inputs deterministic**: test the analysis stage on a *recorded* counter dump (checked-in input data), not on a live run. Then every derived metric is a deterministic function of the input, and text comparison is valid (fix the output precision with `std::setprecision` / `std::format`).
+2. **Compare structurally**: parse both CSV/JSON files, compare keys and string columns exactly, numeric columns with `rtol`/`atol`.
+3. **Drop the volatile columns** from the snapshot and test them with property assertions ("bandwidth is positive and below the hardware peak").
+
+```cpp
+// fragment -- structural CSV comparison with per-column tolerance
+struct ColumnRule { bool numeric; double rtol; };
+
+::testing::AssertionResult CsvClose(const std::vector<std::vector<std::string>>& actual,
+                                    const std::vector<std::vector<std::string>>& expected,
+                                    const std::vector<ColumnRule>& rules) {
+    if (actual.size() != expected.size())
+        return ::testing::AssertionFailure() << "row count " << actual.size()
+                                             << " != " << expected.size();
+    for (size_t r = 0; r < actual.size(); ++r)
+        for (size_t c = 0; c < rules.size(); ++c) {
+            const auto& a = actual[r][c];
+            const auto& e = expected[r][c];
+            bool ok = rules[c].numeric
+                ? std::fabs(std::stod(a) - std::stod(e)) <= rules[c].rtol * std::fabs(std::stod(e))
+                : a == e;
+            if (!ok)
+                return ::testing::AssertionFailure() << "row " << r << " col " << c
+                                                     << ": " << a << " vs " << e;
+        }
+    return ::testing::AssertionSuccess();
+}
+```
+
+## 42.5 The Update Workflow
+
+```text
+  code change -> test fails -> inspect diff (.actual vs .golden)
+        |                              |
+        |              intended?  no --+--> fix the code
+        |                 | yes
+        v                 v
+  UPDATE_GOLDEN=1 ctest -R golden    (rewrites the .golden files)
+        |
+        v
+  git diff testdata/   -> commit the golden changes WITH the code change
+        |
+        v
+  reviewer reads the golden diff as the "behavior change" of the PR
+```
+
+Rules that keep golden tests honest:
+
+- **Never update goldens in CI.** The helper should refuse (or CI should never set the variable). CI only compares.
+- **Commit golden changes in the same PR** as the code change so reviewers see behavior changes next to the cause. A PR that changes 400 golden lines with the message "update goldens" deserves pushback.
+- **Keep goldens small and focused.** One golden per scenario, not one 10,000-line dump; otherwise every change touches it and reviewers stop reading.
+- **Make files diff-friendly**: stable ordering, one record per line, fixed float formatting, LF line endings (`.gitattributes`).
+- **Version the format**: if the report format is a public interface (consumed by scripts or dashboards), a golden diff is a breaking-change signal -- treat it like an API change.
+- **Leave artifacts**: write `.actual` files and upload them as CI artifacts so failures can be diagnosed without rerunning locally.
+
+> **See also:** [rocprof-compute project deep dive](../career/Project_Deep_Dive_rocprof-compute.md) · [Pandas -- testing with pd.testing](Pandas.md#345-testing-with-pdtesting) · [Test design best practices](#36-test-design-best-practices)
+
+## 42.6 Interview Questions -- Golden Files
+
+**Q1. How would you test a profiler's report generator?**
+
+A: Split it into collection and analysis. For analysis, check in a small recorded input (counter dump / trace) and generate the report from it; compare the output against a golden file after normalizing run-dependent fields (timestamps, host, PID, paths, versions). Fix the float formatting so text comparison is stable. Compare measured values structurally with tolerances, or remove them from the snapshot and assert properties instead (non-negative, below peak, percentages summing to 100 within rounding). For collection, use integration tests on real hardware with property assertions (expected kernels present, counters non-zero), not goldens.
+
+**Q2. What are the risks of snapshot testing?**
+
+A: (1) Rubber-stamping: developers rerun with the update flag without reading the diff, so the test encodes whatever the code does, including bugs. (2) Over-broad snapshots: a tiny change touches many files, causing review fatigue. (3) Over-aggressive normalization hides real regressions. (4) Flakiness from nondeterministic output (unordered maps, timings, locale-dependent formatting). Mitigate with small focused goldens, determinism at the source, a tested normalizer, mandatory review of golden diffs, and no updates in CI.
+
+**Q3. How do you handle a timestamp in the output?**
+
+A: Best: inject a clock into the code under test so the timestamp is a fixed value in tests. Second best: normalize it with a narrowly scoped regex (an ISO-8601 pattern, not "any digits") to `<TIMESTAMP>`, and add a separate test that the timestamp field is present and well-formed.
+
+**Q4. Golden file vs `EXPECT_EQ` on a string literal -- when do you choose which?**
+
+A: For a few lines, an inline expected string is better: the expectation is visible in the test, and no file I/O is needed. Once the output is large (tens of lines or more), or when non-programmers review the output, or when a diff tool is the natural way to inspect changes, use a golden file with an update workflow.
+
+---
+
+# 43. Microbenchmarking with Google Benchmark
+
+## 43.1 Why Microbenchmarks Lie
+
+A microbenchmark times a small piece of code in a loop. It is easy to get a precise-looking number that measures the wrong thing:
+
+| Trap | What happens | Defense |
+|---|---|---|
+| Dead-code elimination | The compiler sees the result is unused and deletes the work: "0.3 ns per sort" | `benchmark::DoNotOptimize(result)` |
+| Constant folding / hoisting | Inputs known at compile time; work hoisted out of the loop | Generate inputs at runtime; `DoNotOptimize` the inputs |
+| Store elimination | Writes to memory nobody reads are dropped or merged | `benchmark::ClobberMemory()` |
+| Warm vs cold caches | A 4 KiB input lives in L1 after iteration 1; production data does not | Vary sizes across cache levels; flush or use large rotating buffers for cold-cache numbers |
+| CPU frequency scaling / boost | First iterations run at low clock; later at boost; thermal throttling drifts | Warm-up, performance governor, disable boost, repetitions |
+| Noise from other processes, SMT siblings, interrupts | Outliers and bimodal results | Pinning, quiet dedicated machine, report median and CV |
+| Measuring setup instead of work | Allocation or input generation dominates | Do setup outside the loop, or `PauseTiming` for large per-iteration setup |
+| Debug build | Library or code built with `-O0` | Benchmark warns `Library was built as DEBUG`; always use Release |
+
+Google Benchmark handles the mechanics (choosing the iteration count, timing, statistics, reporting); you remain responsible for **what** is measured.
+
+## 43.2 A Complete Example
+
+```cpp
+#include <benchmark/benchmark.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <numeric>
+#include <random>
+#include <vector>
+
+// 1. The simplest benchmark: the body of the range-for loop is what gets timed.
+static void BM_VectorPushBack(benchmark::State& state) {
+    for (auto _ : state) {
+        std::vector<int> v;
+        v.reserve(1);                        // forces the allocation to happen
+        benchmark::DoNotOptimize(v.data());  // the pointer "escapes": keep the allocation
+        v.push_back(42);
+        benchmark::ClobberMemory();          // memory may be read: keep the store
+    }
+}
+BENCHMARK(BM_VectorPushBack);
+
+// 2. Arguments, ranges, throughput counters, and asymptotic complexity.
+static void BM_Sum(benchmark::State& state) {
+    const auto n = static_cast<size_t>(state.range(0));
+    std::vector<float> data(n, 1.0f);                  // setup: NOT timed
+    for (auto _ : state) {
+        float s = std::accumulate(data.begin(), data.end(), 0.0f);
+        benchmark::DoNotOptimize(s);                   // the result is "used"
+    }
+    state.SetBytesProcessed(int64_t(state.iterations()) * int64_t(n * sizeof(float)));
+    state.SetComplexityN(state.range(0));
+}
+BENCHMARK(BM_Sum)->RangeMultiplier(4)->Range(1 << 10, 1 << 22)->Complexity(benchmark::oN);
+
+// 3. Per-iteration setup excluded with PauseTiming (has overhead: only for big work).
+static void BM_SortRandom(benchmark::State& state) {
+    std::mt19937 rng(42);                              // deterministic input
+    std::vector<int> v(static_cast<size_t>(state.range(0)));
+    for (auto _ : state) {
+        state.PauseTiming();
+        std::generate(v.begin(), v.end(), rng);        // sorting sorted data is cheating
+        state.ResumeTiming();
+        std::sort(v.begin(), v.end());
+        benchmark::DoNotOptimize(v.data());
+    }
+    state.SetItemsProcessed(int64_t(state.iterations()) * state.range(0));
+}
+BENCHMARK(BM_SortRandom)->Arg(1 << 16)->Unit(benchmark::kMicrosecond)
+    ->Repetitions(5)->ReportAggregatesOnly(true);
+
+BENCHMARK_MAIN();
+```
+
+Build and run (link `benchmark::benchmark`, or `benchmark::benchmark_main` and drop `BENCHMARK_MAIN()`):
+
+```cmake
+# fragment
+find_package(benchmark REQUIRED)           # or FetchContent google/benchmark
+add_executable(bench bench.cpp)
+target_link_libraries(bench PRIVATE benchmark::benchmark)
+# Always benchmark an optimized build: cmake -DCMAKE_BUILD_TYPE=Release
+```
+
+Representative output on a Zen 5 EPYC server core (abridged). The header reports ~2 GHz, but that is the frequency sampled when the program starts; the core boosts to ~4.5 GHz during the run, so do not convert ns to cycles with the header value:
+
+```text
+Run on (384 X 1998.64 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x192)
+  L2 Unified 1024 KiB (x192)
+  L3 Unified 32768 KiB (x24)
+---------------------------------------------------------------------------------------
+Benchmark                                Time             CPU   Iterations
+---------------------------------------------------------------------------------------
+BM_VectorPushBack                     4.65 ns         4.65 ns     15051704
+BM_Sum/1024                            424 ns          424 ns       165241 bytes_per_second=9.00528Gi/s
+BM_Sum/16384                          7227 ns         7227 ns         9688 bytes_per_second=8.44597Gi/s
+BM_Sum/4194304                     1862310 ns      1862285 ns           38 bytes_per_second=8.39023Gi/s
+BM_Sum_BigO                           0.44 N          0.44 N
+BM_Sum_RMS                               0 %             0 %
+BM_SortRandom/65536/repeats:5_mean    3051 us         3051 us            5 items_per_second=21.482M/s
+BM_SortRandom/65536/repeats:5_median  3048 us         3048 us            5 items_per_second=21.5044M/s
+BM_SortRandom/65536/repeats:5_stddev  7.64 us         7.66 us            5 items_per_second=53.782k/s
+BM_SortRandom/65536/repeats:5_cv      0.25 %          0.25 %             5 items_per_second=0.25%
+```
+
+How to read it:
+
+- **Time** is wall-clock per iteration; **CPU** is CPU time of the benchmark thread(s). They diverge when the code sleeps, blocks on I/O, or waits for a GPU. Use `->UseRealTime()` for multithreaded or GPU benchmarks.
+- **Iterations** is chosen automatically so the run lasts at least `--benchmark_min_time` (default 0.5 s).
+- `BM_Sum` runs at ~8.4 GiB/s **independent of size**, even at 16 MiB (beyond L2, though still inside the 32 MiB L3 -- this sweep never reaches DRAM): for cache-resident data it is latency-bound, not bandwidth-bound. `std::accumulate` over `float` is a serial chain of dependent FP adds, which the compiler may not reorder or vectorize without `-ffast-math` (FP addition is not associative), so it runs at about one add per FP-add latency: 0.44 ns x ~4.5 GHz ~ 2 cycles, which is the Zen 5 FP-add latency. (Had you used the 2 GHz header value you would get 0.88 cycles per add -- impossible for a dependent chain, a sign the clock assumption is wrong.) That is the kind of insight a benchmark should prompt -- see the roofline discussion in [Performance Engineering](../computer-science/Performance_Engineering.md#3-roofline-model).
+- `BM_Sum_BigO 0.44 N` with RMS 0% confirms linear scaling (0.44 ns per element).
+
+## 43.3 `DoNotOptimize` and `ClobberMemory`
+
+| Call | Compiler-level meaning | Use it for |
+|---|---|---|
+| `DoNotOptimize(x)` | Treat `x` as read (and, for non-const lvalues, possibly written) by an opaque asm statement: its value must be materialized, so the computation producing it cannot be deleted | Results of the computation; also inputs, to stop constant folding |
+| `ClobberMemory()` | A compiler memory barrier (`asm volatile("" ::: "memory")` on GCC/Clang): all memory may have been read and written | Forcing stores to actually happen (e.g., benchmarking `push_back` or `memset`) |
+
+What they do **not** do:
+
+- They are not CPU fences and add no hardware instructions; they only constrain the compiler.
+- `DoNotOptimize(v)` on a container keeps the *object* alive, but not necessarily every element computation; pass `v.data()` plus `ClobberMemory()` when stores into the buffer matter.
+- They cannot stop the compiler from optimizing *inside* the code under test in ways production would also see (that is fine -- you want production codegen). Inspect the assembly (`perf annotate`, Compiler Explorer) when a number looks too good.
+
+## 43.4 Arguments, Ranges, Fixtures, and Threads
+
+| API | Effect |
+|---|---|
+| `->Arg(n)` / `->Args({a, b})` | One instance with the given argument(s), available as `state.range(0)`, `state.range(1)` |
+| `->Range(lo, hi)` | Powers of `RangeMultiplier` (default 8) between `lo` and `hi`, inclusive of the endpoints |
+| `->DenseRange(lo, hi, step)` | Arithmetic sequence |
+| `->Ranges({{lo1, hi1}, {lo2, hi2}})` / `->ArgsProduct({...})` | Cartesian products for multi-dimensional sweeps |
+| `->Complexity(benchmark::oN)` / `oNLogN` / `oAuto` | Fits time against `state.SetComplexityN(n)` and prints `_BigO` and `_RMS` rows |
+| `->Unit(benchmark::kMicrosecond)` | Display unit |
+| `->Threads(t)` / `->ThreadRange(1, 16)` | Run the body on t threads concurrently; per-thread `state.thread_index()` |
+| `->UseRealTime()` | Iteration count based on wall time (use with threads, I/O, GPU) |
+| `->UseManualTime()` + `state.SetIterationTime(sec)` | You measure time yourself (e.g., with GPU events) |
+| `state.SetBytesProcessed(...)` / `SetItemsProcessed(...)` | Adds throughput columns (bytes/s, items/s) |
+| `state.counters["name"] = benchmark::Counter(v, benchmark::Counter::kIsRate)` | Custom counters (cache misses, flops), optionally as rates |
+| `BENCHMARK_F(Fixture, Name)` / `BENCHMARK_DEFINE_F` + `BENCHMARK_REGISTER_F` | Fixture-based benchmarks with `SetUp(const benchmark::State&)` |
+| `BENCHMARK_TEMPLATE(BM_Fn, T)` | Benchmark a template for several types |
+| `state.SkipWithError("msg")` | Abort this benchmark with an error (e.g., no GPU) |
+
+## 43.5 Warm-up, Repetitions, and Aggregates
+
+One run gives one number with unknown variance. Repeat and summarize:
+
+```bash
+./bench --benchmark_repetitions=10 \
+        --benchmark_report_aggregates_only=true \
+        --benchmark_min_warmup_time=0.5 \
+        --benchmark_enable_random_interleaving=true \
+        --benchmark_out=results.json --benchmark_out_format=json \
+        --benchmark_filter='BM_Sum/.*'
+```
+
+| Flag | Effect |
+|---|---|
+| `--benchmark_repetitions=N` | Run each benchmark N times; adds `_mean`, `_median`, `_stddev`, `_cv` (coefficient of variation) rows |
+| `--benchmark_report_aggregates_only` / `--benchmark_display_aggregates_only` | Only aggregates in all outputs / only on the console (file output keeps every repetition) |
+| `--benchmark_min_time=0.5s` (or `100x` for a fixed iteration count) | Minimum measured time per benchmark run |
+| `--benchmark_min_warmup_time=S` | Run for S seconds first and discard the results (warms caches, branch predictors, CPU clocks, lazy initialization) |
+| `--benchmark_enable_random_interleaving` | Interleave repetitions of different benchmarks in random order, reducing the effect of slow drifts (thermal, background load) on comparisons |
+| `--benchmark_out=FILE --benchmark_out_format=json` | Machine-readable results for CI |
+| `--benchmark_filter=REGEX` | Select benchmarks |
+| `->ComputeStatistics("p90", fn)` | Add custom aggregates (e.g., a percentile or max) |
+
+Which aggregate to trust:
+
+- **Median** is robust to outliers (one interrupt or page-fault-heavy run). Use it for regression gating.
+- **CV (stddev / mean)** tells you whether the measurement is usable: below ~1-2% is a quiet machine; above ~5%, fix the environment before comparing anything.
+- **Min** is a reasonable estimate of "the code's cost without interference" for CPU-bound microbenchmarks, but hides real variance; don't use it for latency SLOs.
+- For latency-sensitive code, distributions matter more than means: record per-operation latencies and report p50/p99 (custom statistics or a histogram), not just the average.
+
+## 43.6 Controlling the Environment: Frequency Scaling and Friends
+
+Google Benchmark prints `***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.` when the CPU governor is not `performance`. Typical setup on a dedicated Linux benchmarking machine:
+
+```bash
+sudo cpupower frequency-set --governor performance       # fixed policy, no on-demand ramp-up
+echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost  # disable turbo/boost (where supported)
+taskset -c 2 ./bench --benchmark_repetitions=10          # pin to one core (avoid core 0: interrupts)
+setarch "$(uname -m)" -R ./bench                         # disable ASLR for this run
+```
+
+Other noise sources and fixes: SMT siblings sharing a core (disable SMT or keep the sibling idle), NUMA (pin memory with `numactl --membind`), other tenants on cloud VMs (use dedicated or bare-metal runners), and thermal throttling (watch the clock during long runs). Record the environment in the JSON context (`--benchmark_context=key=value`) so results from different machines are never compared by accident.
+
+## 43.7 Benchmarking GPU Kernels
+
+CPU timers around an asynchronous kernel launch measure only the **launch overhead**. Use device events and manual time:
+
+```cpp
+// fragment -- requires <hip/hip_runtime.h>, device buffers d_x/d_y allocated in setup
+static void BM_Saxpy(benchmark::State& state) {
+    const int n = static_cast<int>(state.range(0));
+    hipEvent_t start, stop;
+    (void)hipEventCreate(&start);
+    (void)hipEventCreate(&stop);
+    saxpy<<<(n + 255) / 256, 256>>>(n, 2.0f, d_x, d_y);    // warm-up: code object load, clocks
+    (void)hipDeviceSynchronize();
+    for (auto _ : state) {
+        (void)hipEventRecord(start);
+        saxpy<<<(n + 255) / 256, 256>>>(n, 2.0f, d_x, d_y);
+        (void)hipEventRecord(stop);
+        (void)hipEventSynchronize(stop);
+        float ms = 0.0f;
+        (void)hipEventElapsedTime(&ms, start, stop);
+        state.SetIterationTime(ms / 1000.0);                  // seconds
+    }
+    state.SetBytesProcessed(int64_t(state.iterations()) * 3LL * n * sizeof(float));
+    (void)hipEventDestroy(start);
+    (void)hipEventDestroy(stop);
+}
+BENCHMARK(BM_Saxpy)->RangeMultiplier(4)->Range(1 << 16, 1 << 26)->UseManualTime();
+```
+
+On a gfx950 (MI350-class) GPU this reported a flat ~8.5 us per iteration from 64K up to 1M elements -- launch plus event overhead, not bandwidth -- and only at 16M+ elements did the time scale with n. Throughput numbers for small sizes are therefore meaningless; a sweep makes the overhead floor visible.
+
+GPU-specific cautions: the first launch includes code-object loading and clock ramp-up (warm up); small kernels are dominated by launch latency (a few microseconds), so batch several launches per measured iteration or use HIP graphs; GPU clocks vary with power and temperature (data-center tools can fix clocks for benchmarking); report achieved bandwidth or FLOP/s against the device peak (roofline), not just time. For kernel-level analysis use a profiler instead of a benchmark -- see [AMD GPU profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md) and [ROCm profiling tools](../ml-gpu/Parallel_GPU_Programming.md#305-rocm-profiling-tools).
+
+## 43.8 Performance-Regression Gating in CI
+
+Unit tests have binary outcomes; performance has noise. A regression gate must decide "slower" without crying wolf.
+
+```mermaid
+flowchart LR
+    A[PR build, Release] --> B[Run baseline and PR benchmarks: same machine, interleaved, N repetitions]
+    B --> C[Compare medians per benchmark]
+    C --> D{"delta > threshold and significant?"}
+    D -- no --> E[Pass; store results for trend dashboard]
+    D -- yes --> F[Fail or flag PR; attach JSON + compare report]
+```
+
+Design choices that make gating reliable:
+
+| Decision | Recommendation | Why |
+|---|---|---|
+| Baseline | Rebuild and rerun the **base commit on the same machine in the same job** | Comparing against numbers from last week on a different runner measures the runner, not the code |
+| Runner | Dedicated, quiet, fixed-frequency machine (or bare-metal); never shared cloud VMs for tight thresholds | Cloud noise is often 5-20% |
+| Statistic | Median of 10-30 repetitions; optionally a Mann-Whitney U test | Robust to outliers; the U test answers "is the difference real?" |
+| Threshold | Per-benchmark, set from observed CV (e.g., 3 x CV, at least 3-5%) | A single global 1% threshold flakes; 20% misses real regressions |
+| Scope | A small curated suite on PRs; the full suite nightly with trend tracking | Benchmarks are slow; trends catch slow creep that per-PR gates miss |
+| Response | Fail on large, significant regressions; flag (comment) on borderline ones; allow an explicit override label with justification | Some regressions are intended trade-offs |
+
+Google Benchmark ships `tools/compare.py`, which runs or loads two result sets and prints relative differences per benchmark, plus a Mann-Whitney U test when there are enough repetitions:
+
+```bash
+pip install -r benchmark/tools/requirements.txt
+python3 benchmark/tools/compare.py benchmarks baseline.json contender.json
+python3 benchmark/tools/compare.py filters ./bench BM_memcpy BM_copy   # compare two benchmarks
+```
+
+A minimal gate script (complete, runs as-is) that fails the job when any median regresses beyond a threshold:
+
+```python
+#!/usr/bin/env python3
+"""Fail CI if any benchmark's median time regressed by more than a threshold.
+
+Usage: perf_gate.py baseline.json contender.json [--threshold 0.05] [--allow-missing]
+Exit codes: 0 ok, 1 regression or missing benchmark, 2 nothing to compare.
+Both files come from: ./bench --benchmark_repetitions=10 \
+    --benchmark_report_aggregates_only=true --benchmark_out=FILE --benchmark_out_format=json
+"""
+import argparse
+import json
+import sys
+
+
+def medians(path):
+    with open(path) as f:
+        data = json.load(f)
+    out = {}
+    for b in data["benchmarks"]:
+        if b.get("run_type") == "aggregate" and b.get("aggregate_name") == "median":
+            out[b["run_name"]] = b["real_time"]   # same time_unit in both runs
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("baseline")
+    ap.add_argument("contender")
+    ap.add_argument("--threshold", type=float, default=0.05)
+    ap.add_argument("--allow-missing", action="store_true",
+                    help="do not fail when a baseline benchmark is absent from the contender")
+    args = ap.parse_args()
+
+    base, new = medians(args.baseline), medians(args.contender)
+    if not base or not new:                     # never go green after comparing nothing
+        print("no median aggregates found; run with --benchmark_repetitions>=2")
+        return 2
+    failed = False
+    for name in sorted(base.keys() & new.keys()):
+        delta = (new[name] - base[name]) / base[name]
+        status = "REGRESSION" if delta > args.threshold else "ok"
+        failed |= delta > args.threshold
+        print(f"{status:10s} {name:50s} {base[name]:12.1f} -> {new[name]:12.1f} ({delta:+.1%})")
+    for name in sorted(base.keys() - new.keys()):
+        print(f"{'MISSING':10s} {name}")          # a deleted/renamed benchmark must not pass silently
+        failed |= not args.allow_missing
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Beyond wall time, consider gating on **deterministic proxies** that do not suffer from noise: instruction counts (`perf stat -e instructions`, or Valgrind `cachegrind`/`callgrind` instruction counts), allocation counts, binary size, or kernel register/LDS usage for GPU code. They do not measure time directly but catch many regressions with near-zero variance.
+
+> **See also:** [Percentiles and why the mean misleads](../computer-science/Performance_Engineering.md#13-percentiles-and-why-the-mean-misleads) · [perf and profiling tools](../tools/Debugging_and_Profiling_Tools.md) · [CI pipelines](../tools/Containers_and_CI.md) · [Git bisect for perf regressions](../tools/Git_Fundamentals.md)
+
+## 43.9 Interview Questions -- Benchmarking
+
+**Q1. What do `benchmark::DoNotOptimize` and `benchmark::ClobberMemory` do, and why are they needed?**
+
+A: Optimizing compilers delete computations whose results are unused and merge or drop stores nobody reads, so a naive loop can measure nothing. `DoNotOptimize(x)` passes `x` to an empty inline-asm statement that the compiler must assume reads (and possibly writes) it, so the value has to be computed and materialized. `ClobberMemory()` is an empty asm with a `"memory"` clobber: the compiler must assume all memory was read and written, so pending stores must be emitted. Both are compiler-only barriers with no runtime cost beyond forcing the work to exist; they are not CPU memory fences.
+
+**Q2. Your benchmark says sorting 1M integers takes 2 ns. What happened?**
+
+A: The work was optimized away or not repeated: the result was unused (missing `DoNotOptimize`), or the vector was sorted in the first iteration and every later iteration sorted already-sorted data (which is much faster for introsort and branch predictors), or the input was a compile-time constant. Fix: regenerate or copy unsorted input per iteration (with `PauseTiming` or by sorting a fresh copy and accounting for the copy), `DoNotOptimize(v.data())`, and verify by checking that the time scales as n log n with `->Complexity(benchmark::oNLogN)`.
+
+**Q3. How do you reduce benchmark variance?**
+
+A: Environment: performance governor, boost disabled, pinned to an isolated core away from interrupts, SMT sibling idle, no other load, ASLR disabled, NUMA-local memory, dedicated hardware. Methodology: warm-up (`--benchmark_min_warmup_time`), enough iterations per run (`--benchmark_min_time`), 10+ repetitions, random interleaving, report the median and CV. Then check the CV: if it is above a few percent, keep fixing the environment before trusting a comparison.
+
+**Q4. How would you design a CI gate for performance regressions without flaky failures?**
+
+A: Run a curated benchmark suite on a dedicated machine; in the same job build and run both the base commit and the PR commit, interleaved, with 10-30 repetitions each; compare medians per benchmark; fail only if the slowdown exceeds a per-benchmark threshold derived from historical CV *and* is statistically significant (e.g., Mann-Whitney U p < 0.05). Flag borderline cases as PR comments rather than failures; store all results for a nightly trend dashboard that catches gradual creep; and add deterministic proxies (instruction counts, allocations) that can be gated tightly. When a regression is found, `git bisect run` with the benchmark as the predicate finds the culprit commit.
+
+**Q5. Why is the median preferred over the mean for benchmark comparisons?**
+
+A: Benchmark noise is one-sided and heavy-tailed: interference (interrupts, page faults, another process) only makes runs slower, and occasionally much slower. The mean is dragged by those outliers; the median is not. For a CPU-bound microbenchmark the minimum is also defensible (the closest to "no interference"), but it hides real variance, so the median is the usual default for gating.
+
+**Q6. Time vs CPU columns differ a lot. What does that tell you?**
+
+A: Wall time much greater than CPU time means the thread was not running on the CPU for part of the measurement: blocking on locks or I/O, sleeping, waiting for a GPU, or being descheduled. For multithreaded benchmarks, CPU time is per-thread by default, so use `->UseRealTime()` to measure what a user experiences. For GPU code, both are wrong unless you synchronize; use device events and `UseManualTime()`.
+
+**Q7. When is a microbenchmark the wrong tool?**
+
+A: When the performance depends on system context it does not reproduce: cache pressure from the rest of the application, contention with other threads, I/O, realistic data distributions, or end-to-end latency. Then use application-level benchmarks, profiling of the real workload (`perf`, rocprof-compute, rocprof-systems), or load tests with latency percentiles. Microbenchmarks are best for comparing implementations of a small, hot, well-isolated function.
+
+---
+
+# 44. Test-Driven Development (TDD)
+
+## 44.1 Red-Green-Refactor
+
+TDD is a design technique that uses tests as the driver:
+
+```text
+        +--------------------------------------------+
+        v                                            |
+   [ RED ]  write ONE small failing test             |
+        |   (a compile error counts as failing)      |
+        v                                            |
+   [ GREEN ] write the SIMPLEST code that passes     |
+        |   (hard-coding is allowed at this stage)   |
+        v                                            |
+   [ REFACTOR ] clean up code AND tests,             |
+            all tests stay green  -------------------+
+```
+
+Uncle Bob's "three laws" make the loop tight: (1) write no production code except to make a failing test pass; (2) write no more of a test than is sufficient to fail; (3) write no more production code than is sufficient to pass. Each cycle takes seconds to a few minutes.
+
+Why it works:
+
+- **Every line of production code is covered by a test that was seen failing.** A test that never failed might not be testing anything (wrong assertion, test not registered).
+- **API first**: writing the call site before the implementation forces you to design the interface from the caller's point of view.
+- **Small steps** keep you out of long debugging sessions: if a test fails unexpectedly, the bug is in the last few lines.
+- **Refactoring is safe** because the behavior is pinned by tests.
+
+## 44.2 Kata: A Bounded Ring Buffer
+
+Requirements: a fixed-capacity FIFO of `T`; `push` returns `false` when full (no overwrite); `pop` returns `std::optional<T>`, empty when there is nothing to pop; capacity 0 is invalid.
+
+**Cycle 1 -- RED.** Start with the most degenerate behavior:
+
+```cpp
+// fragment
+TEST(RingBuffer, NewBufferIsEmpty) {
+    RingBuffer<int> rb(3);
+    EXPECT_TRUE(rb.empty());
+    EXPECT_EQ(rb.size(), 0u);
+}
+// error: 'RingBuffer' was not declared in this scope   <- RED (does not compile)
+```
+
+**Cycle 1 -- GREEN.** The simplest thing that passes -- constants are fine:
+
+```cpp
+// fragment
+template <class T>
+class RingBuffer {
+public:
+    explicit RingBuffer(std::size_t) {}
+    bool empty() const { return true; }
+    std::size_t size() const { return 0; }
+};
+```
+
+**Cycle 2 -- RED.** A test that the hard-coded answer cannot satisfy ("triangulation"):
+
+```cpp
+// fragment
+TEST(RingBuffer, PushMakesItNonEmpty) {
+    RingBuffer<int> rb(3);
+    EXPECT_TRUE(rb.push(7));
+    EXPECT_FALSE(rb.empty());
+    EXPECT_EQ(rb.size(), 1u);
+}
+```
+
+**Cycle 2 -- GREEN.** Introduce a counter -- still no storage, because no test needs it yet:
+
+```cpp
+// fragment
+bool push(T) { ++size_; return true; }
+bool empty() const { return size_ == 0; }
+std::size_t size() const { return size_; }
+```
+
+**Cycle 3 -- RED/GREEN.** `PopReturnsItemsInFifoOrder` forces real storage: a `std::vector<T> buf_` plus `head_` and `tail_` indices. `PopOnEmptyReturnsNullopt` forces the `std::optional` return.
+
+**Cycle 4 -- RED/GREEN.** `PushOnFullIsRejectedAndKeepsContents` forces `full()` and the capacity check -- and pins a **policy decision** (reject vs overwrite) in an executable spec.
+
+**Cycle 5 -- a test that passes immediately.** `FifoOrderSurvivesWrapWhilePartiallyFull` passes on the first run because the cycle-3 implementation already used modular indices. That is acceptable -- it documents behavior -- but **prove it can fail**: temporarily break `next()` so it always returns `0` and watch it go red. A test you have never seen fail is not trustworthy. Note the test design: it keeps two items in flight while both indices wrap, so `head_ != tail_`. A weaker test that alternates one push with one pop never holds more than one element, and the `return 0;` mutant passes it.
+
+Pitfall: do **not** "prove it can fail" by removing the wrap entirely (`return i + 1;`). That indexes past the end of `buf_`, which is undefined behavior, not a reliable failure: at `-O2` the test may still pass (or corrupt the heap somewhere else). UB like this is caught deterministically only when the test build uses `-D_GLIBCXX_ASSERTIONS` (bounds-checked `operator[]` in libstdc++) or `-fsanitize=address`. Use one of these in the test build (see [Section 33](#33-sanitizers-with-googletest)).
+
+**Cycle 6 -- RED/GREEN.** `ZeroCapacityIsRejected` drives the constructor check: a zero-capacity buffer is simultaneously empty and full and every push fails, which is almost certainly a caller bug, so reject it at construction.
+
+**REFACTOR** (after each green): extract `next()`, make `push` take `T` by value and move it, add `capacity()`, rename tests so the list of names reads as a specification. Run all tests after every change.
+
+The final code -- tests in the order they were written:
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <cstddef>
+#include <optional>
+#include <stdexcept>
+#include <vector>
+
+// ---------------- production code (ring_buffer.h) ----------------
+template <class T>
+class RingBuffer {
+public:
+    explicit RingBuffer(std::size_t capacity) : buf_(capacity) {
+        if (capacity == 0) throw std::invalid_argument("capacity must be > 0");
+    }
+    bool empty() const { return size_ == 0; }
+    bool full() const { return size_ == buf_.size(); }
+    std::size_t size() const { return size_; }
+    std::size_t capacity() const { return buf_.size(); }
+
+    // Policy: reject when full (the caller decides whether to drop or retry).
+    bool push(T v) {
+        if (full()) return false;
+        buf_[tail_] = std::move(v);
+        tail_ = next(tail_);
+        ++size_;
+        return true;
+    }
+    std::optional<T> pop() {
+        if (empty()) return std::nullopt;
+        T v = std::move(buf_[head_]);
+        head_ = next(head_);
+        --size_;
+        return v;
+    }
+
+private:
+    std::size_t next(std::size_t i) const { return i + 1 == buf_.size() ? 0 : i + 1; }
+    std::vector<T> buf_;
+    std::size_t head_ = 0, tail_ = 0, size_ = 0;
+};
+
+// ---------------- tests, in the order they were written ----------------
+TEST(RingBuffer, NewBufferIsEmpty) {
+    RingBuffer<int> rb(3);
+    EXPECT_TRUE(rb.empty());
+    EXPECT_EQ(rb.size(), 0u);
+}
+
+TEST(RingBuffer, PushMakesItNonEmpty) {
+    RingBuffer<int> rb(3);
+    EXPECT_TRUE(rb.push(7));
+    EXPECT_FALSE(rb.empty());
+    EXPECT_EQ(rb.size(), 1u);
+}
+
+TEST(RingBuffer, PopReturnsItemsInFifoOrder) {
+    RingBuffer<int> rb(3);
+    rb.push(1);
+    rb.push(2);
+    EXPECT_EQ(rb.pop(), 1);
+    EXPECT_EQ(rb.pop(), 2);
+}
+
+TEST(RingBuffer, PopOnEmptyReturnsNullopt) {
+    RingBuffer<int> rb(3);
+    EXPECT_EQ(rb.pop(), std::nullopt);
+}
+
+TEST(RingBuffer, PushOnFullIsRejectedAndKeepsContents) {
+    RingBuffer<int> rb(2);
+    ASSERT_TRUE(rb.push(1));
+    ASSERT_TRUE(rb.push(2));
+    EXPECT_TRUE(rb.full());
+    EXPECT_FALSE(rb.push(3));
+    EXPECT_EQ(rb.pop(), 1);
+    EXPECT_EQ(rb.pop(), 2);
+}
+
+TEST(RingBuffer, FifoOrderSurvivesWrapWhilePartiallyFull) {
+    RingBuffer<int> rb(3);
+    ASSERT_TRUE(rb.push(0));
+    ASSERT_TRUE(rb.push(1));                // keep 2 items in flight so head_ != tail_
+    for (int i = 2; i < 12; ++i) {          // 10 more push/pop pairs: both indices wrap repeatedly
+        ASSERT_TRUE(rb.push(i));
+        ASSERT_EQ(rb.pop(), i - 2);
+    }
+    EXPECT_EQ(rb.size(), 2u);
+}
+
+TEST(RingBuffer, ZeroCapacityIsRejected) {
+    EXPECT_THROW(RingBuffer<int>(0), std::invalid_argument);
+}
+```
+
+Follow-ups an interviewer might ask for, each as one more red-green cycle: an overwrite-oldest policy (as a template parameter or a separate class), a `front()` accessor, a power-of-two capacity using `& (cap - 1)` instead of the branch, or a single-producer/single-consumer lock-free version (then the tests from Section 40 apply).
+
+## 44.3 When TDD Helps and When It Does Not
+
+| Works well | Works poorly |
+|---|---|
+| Pure logic with clear inputs/outputs: parsers, data structures, unit conversions, metric formulas | Exploratory or research code where the requirements are unknown (spike first, then test-drive the real version) |
+| Bug fixes: write the failing test that reproduces the bug **first** | GPU kernel performance tuning (the requirement is speed; use benchmarks and profilers) |
+| Refactoring legacy code (after characterization tests pin current behavior) | UI layout, visual output (use snapshot tests) |
+| Designing APIs from the caller's perspective | Thin glue over external systems (integration tests give more value) |
+
+Common misconceptions: TDD does not mean "100% coverage" or "no design up front"; it does not require testing private methods (test through the public API); and "test-first" for a bug fix is valuable even on teams that do not practice full TDD.
+
+## 44.4 Interview Questions -- TDD
+
+**Q1. Explain red-green-refactor. Why must you see the test fail first?**
+
+A: Red: write one small test for the next behavior and watch it fail. Green: write the simplest code that passes. Refactor: improve the design of code and tests with all tests green. Seeing the test fail proves that the test can detect the absence of the behavior -- it is registered, it runs, and its assertion is actually checking something. A test written after the code that has never failed may pass for the wrong reason (asserting on the wrong variable, always-true condition, not linked into the binary).
+
+**Q2. Isn't writing `return true;` to pass a test silly?**
+
+A: It is a deliberate step called "fake it till you make it". It confirms the test harness works and keeps steps small; the next test ("triangulation") then forces the general implementation. Experienced practitioners skip the fake step when the obvious implementation is trivial, but the principle -- don't write code no test demands -- remains.
+
+**Q3. How do you apply TDD to a bug report?**
+
+A: Reproduce the bug as a failing automated test at the lowest level that shows it (unit if possible). Confirm it fails for the reported reason. Fix the code until it passes. Keep the test as a regression test, named after the behavior rather than the ticket number. For concurrency bugs, make the reproduction deterministic with seams and barriers (Section 40.3).
+
+**Q4. What are the downsides of TDD?**
+
+A: Tests can over-specify implementation (especially with heavy mocking), making refactoring harder; it is slower for exploratory work; it can lead to designs bent around testability (excessive interfaces); and it does not by itself produce good integration or performance coverage. These are mitigated by testing behavior through public APIs, preferring fakes over strict mocks, and complementing unit tests with integration, golden, and benchmark tests.
+
+---
+
+# 45. Catch2 v3 and doctest Compared with GoogleTest
+
+## 45.1 Syntax at a Glance
+
+| Concept | GoogleTest | Catch2 v3 | doctest |
+|---|---|---|---|
+| Header | `<gtest/gtest.h>` | `<catch2/catch_test_macros.hpp>` (+ per-feature headers) | `<doctest/doctest.h>` (single header) |
+| Library / main | Link `GTest::gtest_main` | Link `Catch2::Catch2WithMain` (v3 is a compiled library, no longer header-only) | `#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN` in one TU |
+| Test | `TEST(Suite, Name)` | `TEST_CASE("name", "[tags]")` | `TEST_CASE("name")` (+ `* doctest::test_suite("s")`) |
+| Non-fatal check | `EXPECT_EQ(a, b)` | `CHECK(a == b)` | `CHECK(a == b)` or `CHECK_EQ(a, b)` |
+| Fatal check | `ASSERT_EQ(a, b)` | `REQUIRE(a == b)` | `REQUIRE(a == b)` |
+| Expression decomposition | No -- one macro per operator | Yes: `CHECK(a == b)` prints both values | Yes, same as Catch2 |
+| Floating point | `EXPECT_NEAR`, `EXPECT_DOUBLE_EQ` | `CHECK_THAT(x, WithinRel(y, eps))`, `WithinAbs`, `WithinULP`; `Catch::Approx` | `CHECK(x == doctest::Approx(y).epsilon(1e-9))` |
+| Exceptions | `EXPECT_THROW(stmt, T)` | `CHECK_THROWS_AS(expr, T)`, `CHECK_THROWS_WITH(expr, msg)` | `CHECK_THROWS_AS(expr, T)` |
+| Shared setup | Fixture class + `TEST_F` | `SECTION`s (or `TEST_CASE_METHOD(Fixture, ...)`) | `SUBCASE`s (or `TEST_CASE_FIXTURE`) |
+| Parameterized | `TEST_P` + `INSTANTIATE_TEST_SUITE_P` | `GENERATE(...)` inside a test case | Loop over a data table with `CAPTURE(x)`, or one `SUBCASE` per value |
+| Typed tests | `TYPED_TEST` | `TEMPLATE_TEST_CASE("n", "[t]", int, float)` | `TEST_CASE_TEMPLATE("n", T, int, float)` |
+| BDD style | -- | `SCENARIO` / `GIVEN` / `WHEN` / `THEN` | `SCENARIO` / `GIVEN` / `WHEN` / `THEN` |
+| Mocking | GoogleMock | None built-in (Trompeloeil, FakeIt) | None built-in (Trompeloeil) |
+| Death tests | `EXPECT_DEATH` | No | No |
+| Benchmarks | No (Google Benchmark separately) | `BENCHMARK("name") { ... };` (micro, built in) | No |
+| Filtering | `--gtest_filter=Suite.*` | Tag expressions: `./tests "[vector]~[slow]"` | `-tc="vector*" -ts=suite` |
+| CTest discovery | `gtest_discover_tests` | `catch_discover_tests` (from Catch2's CMake scripts) | `doctest_discover_tests` (from doctest's CMake scripts) |
+
+## 45.2 Catch2 `SECTION`s: Fixtures Without Classes
+
+```cpp
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include <cmath>
+#include <stdexcept>
+#include <vector>
+
+// The TEST_CASE body re-runs once per leaf SECTION, so each section starts
+// from freshly constructed state -- the "fixture" is just local variables.
+TEST_CASE("vector growth", "[vector]") {
+    std::vector<int> v(5);
+    REQUIRE(v.size() == 5);          // REQUIRE = ASSERT (stops); CHECK = EXPECT
+
+    SECTION("resize bigger grows size and capacity") {
+        v.resize(10);
+        CHECK(v.size() == 10);
+        CHECK(v.capacity() >= 10);
+    }
+    SECTION("reserve grows capacity, not size") {
+        v.reserve(10);
+        CHECK(v.size() == 5);
+        CHECK(v.capacity() >= 10);
+    }
+}
+
+SCENARIO("a stack-like vector", "[vector][bdd]") {
+    GIVEN("an empty vector") {
+        std::vector<int> v;
+        WHEN("an element is pushed") {
+            v.push_back(42);
+            THEN("size is one and back() is that element") {
+                REQUIRE(v.size() == 1);
+                CHECK(v.back() == 42);
+            }
+        }
+    }
+}
+
+TEST_CASE("floating point and generators", "[math]") {
+    auto x = GENERATE(0.5, 1.0, 2.0);          // the test case runs once per value
+    CHECK_THAT(std::sqrt(x) * std::sqrt(x), Catch::Matchers::WithinRel(x, 1e-12));
+    CHECK_THROWS_AS(static_cast<void>(std::vector<int>().at(0)), std::out_of_range);
+}
+```
+
+Build: `target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)`, then `include(Catch)` and `catch_discover_tests(tests)`. Output: `All tests passed (14 assertions in 3 test cases)` -- the 3 test cases ran 6 times in total (2 sections + 1 scenario path + 3 generated values).
+
+**The execution model** is the key interview point: Catch2 runs the `TEST_CASE` from the top **once per leaf section**. On each run it enters exactly one not-yet-executed leaf and skips the others; the code before the sections re-executes each time. Nested sections form a tree, and each root-to-leaf path is one run. `SCENARIO`/`GIVEN`/`WHEN`/`THEN` are just aliases for `TEST_CASE`/`SECTION` with prefixed names, so a BDD test is a section tree that reads as a specification.
+
+Consequences: setup code before the sections must be cheap and side-effect free (it reruns); a failing `REQUIRE` in the shared prefix stops all paths; and local variables give you per-path isolation with zero boilerplate -- the main advantage over GoogleTest's fixture classes.
+
+## 45.3 doctest: Catch2-like Syntax, Minimal Compile Cost
+
+```cpp
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN   // exactly one TU provides main()
+#include <doctest/doctest.h>
+
+#include <stdexcept>
+#include <vector>
+
+TEST_CASE("vector growth") {
+    std::vector<int> v(5);
+    REQUIRE(v.size() == 5);
+
+    SUBCASE("resize bigger") {
+        v.resize(10);
+        CHECK(v.size() == 10);
+    }
+    SUBCASE("reserve") {
+        v.reserve(10);
+        CHECK(v.size() == 5);
+        CHECK(v.capacity() >= 10);
+    }
+}
+
+SCENARIO("a stack-like vector") {
+    GIVEN("an empty vector") {
+        std::vector<int> v;
+        WHEN("an element is pushed") {
+            v.push_back(42);
+            THEN("back() is that element") { CHECK(v.back() == 42); }
+        }
+    }
+}
+
+TEST_CASE("approx and exceptions") {
+    CHECK(0.1 + 0.2 == doctest::Approx(0.3));
+    CHECK_THROWS_AS(static_cast<void>(std::vector<int>().at(0)), std::out_of_range);
+}
+```
+
+doctest's distinguishing features: a single header whose test registration costs very little compile time, `SUBCASE` with the same re-execution model as Catch2's `SECTION`, and the ability to put tests **inside production headers** and strip them from release builds with `DOCTEST_CONFIG_DISABLE` (macros expand to nothing). It also has no death tests and no mocking.
+
+(The `static_cast<void>` in both examples avoids a `-Wunused-result` warning, because `std::vector::at` is `[[nodiscard]]` in recent libstdc++.)
+
+## 45.4 Choosing a Framework
+
+| Situation | Choice | Reason |
+|---|---|---|
+| Large codebase, need mocks, death tests, parameterized/typed tests, wide CI/IDE tooling | **GoogleTest + GoogleMock** | Most complete feature set; industry default; what most C++ teams (including ROCm components) use |
+| Want the most readable tests, BDD style, tag-based selection, built-in micro-benchmarks | **Catch2 v3** | Expression decomposition, sections, generators, matchers |
+| Compile time is critical, or tests should live next to code in headers | **doctest** | Fastest compile; tests can be disabled away |
+| Mixed codebase | Pick one per repository | Two frameworks double the CI and developer learning cost |
+
+> **See also:** [CMake -- gtest_discover_tests and catch_discover_tests](../tools/CMake_Fundamentals.md#45-gtest_discover_tests-and-catch_discover_tests) · [Framework landscape](#1-why-unit-testing-in-c) · [Python's pytest equivalents](Python_Fundamentals.md)
+
+## 45.5 Interview Questions -- Frameworks
+
+**Q1. How do Catch2 `SECTION`s replace fixtures?**
+
+A: The test case body is re-executed from the top once for each leaf section, entering exactly one leaf per run. Code before the sections acts as `SetUp`, local variables are fresh on each run (isolation), and code after a section acts as per-path teardown (RAII destructors run naturally). This removes the fixture class, `TEST_F`, and member-variable boilerplate. The cost: the shared prefix reruns for every leaf, so expensive setup should be hoisted to a static or a `TEST_CASE_METHOD` fixture.
+
+**Q2. What is expression decomposition, and why can't GoogleTest do `EXPECT(a == b)`?**
+
+A: Catch2 and doctest capture `CHECK(a == b)` as `Decomposer() <= a == b`. Because `<=` binds tighter than `==`, this parses as `(Decomposer() <= a) == b`; the first operator captures `a` in a wrapper object whose overloaded `==` then captures `b` and the operator. So on failure the framework can print both operand values, not just "false". GoogleTest predates this style and uses one macro per comparison (`EXPECT_EQ`, `EXPECT_LT`) to get the same information; `EXPECT_TRUE(a == b)` only reports that the expression was false.
+
+**Q3. Catch2 v2 vs v3 -- what changed?**
+
+A: v2 was a single header (slow to compile because every TU parsed the whole framework); v3 is a regular compiled library split into many headers (`catch_test_macros.hpp`, `matchers/...`, `generators/...`), linked as `Catch2::Catch2` or `Catch2::Catch2WithMain`. Most test code ports with an include change; matchers moved into `Catch::Matchers` with headers per matcher family. The motivation was compile time and modularity.
+
+**Q4. When would you not choose GoogleTest?**
+
+A: When compile time of the test suite dominates developer iteration (doctest), when you want tests embedded in headers of a header-only library (doctest), when the team values BDD-style readable specifications and tag-based selection (Catch2), or when Catch2's built-in micro-benchmarks are sufficient. GoogleTest remains the safe default when you need mocking and death tests.
+
+---
+
+# 46. Mutation Testing with Mull
+
+## 46.1 The Idea
+
+Coverage tells you which lines **executed**, not whether any test would **notice** if they were wrong (Section 32.8). Mutation testing measures that directly:
+
+1. Generate **mutants**: copies of the program with one small change each (`a + b` -> `a - b`, `<` -> `<=`, `==` -> `!=`, remove a call to a `void` function, replace a returned scalar with a constant).
+2. Run the test suite against each mutant.
+3. A mutant is **killed** if some test fails, and **survives** if all tests still pass.
+
+```text
+mutation score = killed / (total - equivalent mutants)
+```
+
+A surviving mutant means: "this code could be wrong in this way and no test would catch it". Typical findings: boundary conditions never tested exactly (`<` vs `<=`), return values never asserted, side effects (logging, metrics, cache invalidation) never checked.
+
+**Equivalent mutants** -- changes that do not alter observable behavior (e.g., mutating `i < n` to `i != n` in a loop where `i` steps by 1) -- cannot be killed and must be ignored, which is why 100% is not a realistic goal.
+
+## 46.2 Mull Workflow
+
+Mull is an LLVM-based mutation testing tool for C and C++. It mutates at the LLVM IR level during compilation (via a Clang pass plugin), so all mutants are compiled into **one** binary and enabled at runtime, avoiding a rebuild per mutant:
+
+```bash
+# 1. Compile the test binary with the Mull IR frontend plugin (version must match clang).
+clang++-18 -fpass-plugin=/usr/lib/mull-ir-frontend-18 -g -grecord-command-line \
+    -O0 ring_test.cpp -o ring_test -lgtest_main -lgtest -pthread
+
+# 2. Run every mutant against the test binary; show survivors.
+mull-runner-18 ./ring_test
+mull-runner-18 -ide-reporter-show-killed ./ring_test     # also list killed mutants
+```
+
+```yaml
+# mull.yml -- in the source directory; picked up at compile time
+mutators:
+  - cxx_comparison        # ==, !=, <, <=, >, >=
+  - cxx_boundary          # < <-> <=, > <-> >=
+  - cxx_arithmetic        # + - * / %
+  - cxx_remove_void_call
+excludePaths:
+  - .*/third_party/.*
+  - .*/gtest/.*
+```
+
+Example report line for a survivor:
+
+```text
+ring_buffer.h:27:24: warning: Survived: Replaced == with != [cxx_eq_to_ne]
+[info] Mutation score: 92%
+```
+
+(Exact binary names and plugin paths depend on the Mull and LLVM versions; check `mull-runner --version` and the installed `mull-ir-frontend-*` file. Mull requires Clang/LLVM; GCC-built code cannot be mutated.)
+
+## 46.3 Practical Use
+
+| Aspect | Guidance |
+|---|---|
+| Cost | Runs the suite once per mutant (thousands of mutants) -- keep tests fast, restrict to changed files or critical modules, run nightly or on demand |
+| Scope | Pure logic, parsers, metric formulas, data structures. Skip generated code, logging, and GPU device code |
+| Reading results | Triage survivors: add a missing assertion, add a boundary test, mark equivalent mutants, or decide the code is dead and delete it |
+| Targets | Use the score as a **trend and a review aid**, not a hard gate; 70-85% on core logic is already strong |
+| Alternatives | Dextool (C/C++), and for other languages PIT (Java), mutmut / cosmic-ray (Python), cargo-mutants (Rust) |
+
+## 46.4 Interview Questions -- Mutation Testing
+
+**Q1. What does mutation testing measure that coverage does not?**
+
+A: Coverage measures whether code ran under tests; mutation testing measures whether tests would detect a fault in it. A test that calls a function but asserts nothing gives 100% coverage and kills zero mutants. Mutation score is therefore a much better proxy for test-suite effectiveness (fault-detection ability).
+
+**Q2. Why is mutation testing not run on every PR in most teams?**
+
+A: Cost: the suite runs once per mutant, so a module with 2,000 mutants and a 5-second suite takes nearly 3 hours serially. Tools mitigate this (Mull compiles mutants into one binary; runs only tests covering the mutated line; parallelizes), and teams restrict it to changed code or run it nightly. Equivalent mutants also add manual triage work.
+
+**Q3. You see a surviving mutant `<` -> `<=` in a bounds check. What do you do?**
+
+A: Add a test at the exact boundary (index == size), which distinguishes the two operators. If no such input is possible (e.g., the value can never equal the bound), the mutant may be equivalent -- document it, or simplify the code so the redundant condition disappears.
 
 ---
 
