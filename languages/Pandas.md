@@ -1,6 +1,8 @@
 # Pandas -- Comprehensive Reference
 
-> A deep, all-levels reference for the Pandas data-analysis library. Covers the foundations (Series, DataFrame, Index), the dtype system (including the modern PyArrow backend and nullable extension types), selection and filtering, cleaning and transformation, GroupBy and reshaping, combining and joining, time series, I/O, plotting and styling, performance and memory, and Pandas internals -- with comparison tables, code examples, common pitfalls, and interview questions throughout. Targets Pandas 2.x conventions including Copy-on-Write, `ArrowDtype`, nullable extension dtypes, and the new frequency aliases. Complements *Python Fundamentals* and the NumPy / PyQt sections of *Python Libraries*.
+> A deep, all-levels reference for the Pandas data-analysis library. Covers the foundations (Series, DataFrame, Index), the dtype system (including the modern PyArrow backend and nullable extension types), selection and filtering, cleaning and transformation, GroupBy and reshaping, combining and joining, a SQL-to-pandas translation guide, time series, I/O, plotting and styling, performance and memory, and Pandas internals -- with comparison tables, code examples, common pitfalls, and interview questions throughout. Targets Pandas 2.x conventions including Copy-on-Write, `ArrowDtype`, nullable extension dtypes, and the new frequency aliases. Complements [*Python Fundamentals*](Python_Fundamentals.md) and the NumPy / PyQt sections of [*Python Libraries*](Python_Libraries.md).
+
+> **See also:** [Python Libraries -- Pandas Quick Reference (one-page summary of this file)](Python_Libraries.md#13-pandas-quick-reference-summary-of-pandasmd) · [NumPy ndarray fundamentals](Python_Libraries.md#1-ndarray-fundamentals) · [Broadcasting](Python_Libraries.md#4-broadcasting) · [NumPy pitfalls and interview questions](Python_Libraries.md#9-numpy-common-pitfalls-and-interview-questions) · [SQL and Pandas Exercises](../practice/SQL_and_Pandas_Exercises.md)
 
 ---
 
@@ -48,26 +50,27 @@
 23. [concat](#23-concat)
 24. [merge and join](#24-merge-and-join)
 25. [merge_asof, merge_ordered, compare, align](#25-merge_asof-merge_ordered-compare-align)
+26. [SQL to pandas Translation](#26-sql-to-pandas-translation)
 
 ### Part 7: Time Series
 
-26. [Timestamps, Periods, Timedeltas](#26-timestamps-periods-timedeltas)
-27. [Date Ranges, Resampling, Shifting, Windows](#27-date-ranges-resampling-shifting-windows)
-28. [Timezones, Business Days, Calendars](#28-timezones-business-days-calendars)
+27. [Timestamps, Periods, Timedeltas](#27-timestamps-periods-timedeltas)
+28. [Date Ranges, Resampling, Shifting, Windows](#28-date-ranges-resampling-shifting-windows)
+29. [Timezones, Business Days, Calendars](#29-timezones-business-days-calendars)
 
 ### Part 8: I/O, Visualization, Performance
 
-29. [I/O Formats](#29-io-formats)
-30. [Plotting and Styling](#30-plotting-and-styling)
-31. [Performance](#31-performance)
-32. [Memory Optimization](#32-memory-optimization)
+30. [I/O Formats](#30-io-formats)
+31. [Plotting and Styling](#31-plotting-and-styling)
+32. [Performance](#32-performance)
+33. [Memory Optimization](#33-memory-optimization)
 
 ### Part 9: Internals, Ecosystem, Pitfalls
 
-33. [Pandas Internals and Testing](#33-pandas-internals-and-testing)
-34. [Ecosystem and When to Switch](#34-ecosystem-and-when-to-switch)
-35. [Idioms and Method Chaining Recipes](#35-idioms-and-method-chaining-recipes)
-36. [Common Pitfalls and Interview Questions](#36-common-pitfalls-and-interview-questions)
+34. [Pandas Internals and Testing](#34-pandas-internals-and-testing)
+35. [Ecosystem and When to Switch](#35-ecosystem-and-when-to-switch)
+36. [Idioms and Method Chaining Recipes](#36-idioms-and-method-chaining-recipes)
+37. [Common Pitfalls and Interview Questions](#37-common-pitfalls-and-interview-questions)
 
 ---
 
@@ -276,6 +279,8 @@ s1.add(s2, fill_value=0)
 | String accessor | No | No | Yes (`.str`) |
 | Datetime accessor | No | Limited | Yes (`.dt`) |
 | Memory overhead | High (per-element box) | Low (contiguous) | Low + small index |
+
+> See also: [NumPy ndarray fundamentals](Python_Libraries.md#1-ndarray-fundamentals) and [memory layout and strides](Python_Libraries.md#15-memory-layout-and-strides) for what a NumPy-backed Series stores underneath. [Python list internals](Python_Fundamentals.md#22-lists) explain why a `list` boxes every element.
 
 ## 2.6 Hashable Index Labels
 
@@ -675,6 +680,8 @@ pd.Series([1, 2], dtype='int64') + pd.Series([1.5, 2.5])      # → float64
 pd.Series([1, 2], dtype='Int64') + pd.Series([1.5, 2.5])      # → Float64 (nullable)
 pd.Series([True, False]) + pd.Series([1, 2])                   # → int64
 ```
+
+> See also: [NumPy dtype system](Python_Libraries.md#14-the-dtype-system) (the NumPy half of the dtype family) and [dtype precision and integer overflow](Python_Libraries.md#106-dtype-precision-float16-bfloat16-float32-and-integer-overflow).
 
 ---
 
@@ -1312,6 +1319,8 @@ To prepare a codebase for CoW (and Pandas 3.0):
 4. Replace `df.fillna(..., inplace=True)` with `df = df.fillna(...)`.
 5. Replace `df.append(...)` with `pd.concat([df, ...], ignore_index=True)`.
 6. Run the suite under `-W error::FutureWarning` to surface deprecations early.
+
+> See also: NumPy's view-vs-copy rules, which pandas CoW deliberately hides: [basic indexing returns views](Python_Libraries.md#21-basic-indexing-returns-views), [fancy indexing returns copies](Python_Libraries.md#22-fancy-indexing-returns-copies), and the [views vs copies quiz](Python_Libraries.md#108-views-vs-copies-quiz). Also [Python copy semantics](Python_Fundamentals.md#25-copy-semantics).
 
 ---
 
@@ -2682,6 +2691,8 @@ pd.merge(left, right, on='key', how='inner')
 | `'outer'` | `FULL OUTER JOIN` | All rows from either side |
 | `'cross'` | `CROSS JOIN` | Cartesian product (use sparingly!) |
 
+Semi-joins, anti-joins, self-joins, non-equi joins, and the full SQL-to-pandas mapping (WHERE, GROUP BY/HAVING, window functions, CTEs) are in [26. SQL to pandas Translation](#26-sql-to-pandas-translation).
+
 ```
        LEFT                        OUTER                         INNER
     ┌────────┐                ┌─────────────┐                ┌────────┐
@@ -2775,7 +2786,7 @@ left  = pd.DataFrame({'k': [1, 1], 'v': ['a','b']})
 right = pd.DataFrame({'k': [1, 1], 'v': ['x','y']})
 pd.merge(left, right, on='k')                      # 4 rows!
 
-# 3. NaN keys do NOT match each other
+# 3. NaN keys DO match each other (unlike SQL NULLs); this returns 0 rows only because right has no NaN keys
 pd.merge(left.assign(k=np.nan), right, on='k')     # 0 rows
 
 # 4. Reordering keys silently OK -- order doesn't matter
@@ -2785,6 +2796,8 @@ pd.merge(left, right, on=['k2', 'k1'])             # same result, only column or
 # 5. Always validate when you think the merge is unique
 pd.merge(orders, products, on='product_id', validate='m:1')   # fails fast on dup product_ids
 ```
+
+> **Clarification on pitfall 3.** The example returns 0 rows only because `right` has no NaN keys. When **both** sides contain NaN/NA keys, `merge` **does** match them to each other. The pandas docs call this out as different from SQL, where NULL keys never join. To get SQL behaviour, drop null keys before merging: `left.dropna(subset=['k']).merge(right, on='k')`. See [26.4](#264-null-semantics-sql-three-valued-logic-vs-nan--na).
 
 ---
 
@@ -2922,15 +2935,764 @@ df.update(patch)
 
 ---
 
+# 26. SQL to pandas Translation
+
+---
+
+Interviewers often ask for the same question twice, once in SQL and once in pandas, or they hand you a SQL query and ask for the pandas version. This section maps every common SQL construct to idiomatic pandas, and it covers the places where the two **silently disagree**. Most of those are about NULL versus NaN.
+
+> **Requires pandas.** Every code block in this section needs `pandas` and `numpy` (`pip install pandas numpy`). The examples were checked against pandas 3.1 and 2.2. Where the two versions behave differently, the text says so. The SQL is ANSI/PostgreSQL-flavoured. Blocks that begin with `# fragment` reuse the `emp` / `dept` tables from 26.1.
+>
+> **See also:** [SQL and pandas exercises with solutions](../practice/SQL_and_Pandas_Exercises.md) · [CS Fundamentals -- SQL Essentials](../computer-science/CS_Fundamentals.md#32-sql-essentials) · [merge and join](#24-merge-and-join) · [Window Functions](#21-window-functions) · [Ranking](#124-ranking) · [Missing Data Semantics](#6-missing-data-semantics)
+
+## 26.1 Mental Model and Sample Tables
+
+SQL is declarative, and the engine evaluates clauses in a fixed **logical order** that differs from the order you write them in. pandas is imperative: each method in a chain runs in the order you write it. Writing the chain in SQL's logical order prevents most translation bugs.
+
+| Step | SQL clause (logical order) | pandas equivalent |
+|---|---|---|
+| 1 | `FROM` / `JOIN` | the starting frame, `merge` |
+| 2 | `WHERE` | boolean mask / `query` (before grouping) |
+| 3 | `GROUP BY` | `groupby(...)` |
+| 4 | aggregates | `.agg(...)` |
+| 5 | `HAVING` | mask / `query` on the aggregated frame |
+| 6 | window functions | `groupby(...).transform / rank / shift / cumsum` |
+| 7 | `SELECT` (projection, aliases) | `[[cols]]`, `assign`, `rename` |
+| 8 | `DISTINCT` | `drop_duplicates()` |
+| 9 | `ORDER BY` | `sort_values` |
+| 10 | `LIMIT` / `OFFSET` | `head` / `iloc[offset:offset+n]` |
+
+Two consequences of this order:
+
+- **Window functions see only rows that survive `WHERE`.** In pandas, filter first and then compute `rank` / `cumsum`. If you rank first and filter afterwards, the result differs.
+- **SQL cannot use a `SELECT` alias in `WHERE`**, because `WHERE` runs before `SELECT`. pandas has no such restriction: `assign(x=...)` followed by `query('x > 0')` works.
+
+Sample tables used throughout. Hal has no department, Gus has no salary, and department 40 (Legal) has no employees.
+
+```python
+# requires: pandas>=2.2, numpy  (pip install pandas numpy)
+import numpy as np
+import pandas as pd
+
+emp = pd.DataFrame({
+    'emp_id':     [1, 2, 3, 4, 5, 6, 7, 8],
+    'name':       ['Ana', 'Ben', 'Cai', 'Dee', 'Eve', 'Fay', 'Gus', 'Hal'],
+    'dept_id':    pd.array([10, 10, 10, 20, 20, 30, 30, None], dtype='Int64'),
+    'salary':     [120.0, 100.0, 100.0, 90.0, 95.0, 70.0, np.nan, 60.0],
+    'manager_id': pd.array([None, 1, 1, None, 4, None, 6, 1], dtype='Int64'),
+    'hire_date':  pd.to_datetime(['2019-03-01', '2020-07-15', '2021-01-10',
+                                  '2018-11-30', '2022-05-02', '2020-02-20',
+                                  '2023-09-01', '2024-01-08']),
+})
+dept = pd.DataFrame({
+    'dept_id':   pd.array([10, 20, 30, 40], dtype='Int64'),
+    'dept_name': ['Eng', 'Ops', 'Sales', 'Legal'],
+})
+print(emp)
+#    emp_id name  dept_id  salary  manager_id  hire_date
+# 0       1  Ana       10   120.0        <NA> 2019-03-01
+# 1       2  Ben       10   100.0           1 2020-07-15
+# 2       3  Cai       10   100.0           1 2021-01-10
+# 3       4  Dee       20    90.0        <NA> 2018-11-30
+# 4       5  Eve       20    95.0           4 2022-05-02
+# 5       6  Fay       30    70.0        <NA> 2020-02-20
+# 6       7  Gus       30     NaN           6 2023-09-01
+# 7       8  Hal     <NA>    60.0           1 2024-01-08
+```
+
+`dept_id` uses the nullable `Int64` dtype on purpose: a plain `int64` column cannot hold a missing value and would be silently upcast to `float64`. `salary` stays `float64` with `NaN`. These two dtypes treat missing values differently in filters (26.4).
+
+> **Tip -- check your translation with DuckDB.** `pip install duckdb`, then `duckdb.sql("SELECT ... FROM emp").df()` runs real SQL directly against in-scope pandas DataFrames, looked up by variable name. Comparing its output with your pandas chain is the fastest way to catch NULL-semantics bugs. (See [When to Use DuckDB Alongside Pandas](#354-when-to-use-duckdb-alongside-pandas).)
+
+## 26.2 Master Translation Table
+
+| SQL | pandas | Notes |
+|---|---|---|
+| `SELECT a, b FROM t` | `t[['a', 'b']]` | Double brackets give a DataFrame; `t['a']` gives a Series |
+| `SELECT a AS x` | `t[['a']].rename(columns={'a': 'x'})` | |
+| `SELECT *, a * 2 AS y` | `t.assign(y=t['a'] * 2)` | `assign(y=lambda d: d['a'] * 2)` works inside chains |
+| `WHERE a > 5 AND b = 'x'` | `t[(t['a'] > 5) & (t['b'] == 'x')]` or `t.query("a > 5 and b == 'x'")` | Parentheses are required because `&` binds tighter than `>` |
+| `WHERE a IN (1, 2)` | `t[t['a'].isin([1, 2])]` | |
+| `WHERE a NOT IN (...)` | `t[~t['a'].isin([...])]` | NULL semantics differ (26.4) |
+| `WHERE a BETWEEN 1 AND 5` | `t[t['a'].between(1, 5)]` | Both ends inclusive in both; `inclusive='left'` etc. available |
+| `WHERE a IS NULL` / `IS NOT NULL` | `t[t['a'].isna()]` / `t[t['a'].notna()]` | Never `== np.nan` |
+| `WHERE name LIKE 'A%'` | `t[t['name'].str.startswith('A')]` | General patterns: `str.contains(regex)`, `str.match`, `str.fullmatch` |
+| `ORDER BY a, b DESC` | `t.sort_values(['a', 'b'], ascending=[True, False])` | NULL placement differs (26.4) |
+| `LIMIT 10` | `t.head(10)` | |
+| `LIMIT 10 OFFSET 20` | `t.iloc[20:30]` | |
+| `ORDER BY a DESC LIMIT 3` | `t.nlargest(3, 'a')` | Avoids a full sort: O(n + k log k) average (quickselect on the k-th value, then sort only the survivors) |
+| `FETCH FIRST 3 ROWS WITH TIES` | `t.nlargest(3, 'a', keep='all')` | |
+| `SELECT DISTINCT a, b` | `t[['a', 'b']].drop_duplicates()` | |
+| `SELECT DISTINCT ON (k) ... ORDER BY k, ts DESC` (Postgres) | `t.sort_values(['k', 'ts'], ascending=[True, False]).drop_duplicates('k')` | "Latest row per key" |
+| `COUNT(*)` | `len(t)` / `g.size()` | Counts rows, including rows with NULLs |
+| `COUNT(a)` | `t['a'].count()` / `g['a'].count()` | Counts non-null values |
+| `COUNT(DISTINCT a)` | `t['a'].nunique()` / `g['a'].nunique()` | Both ignore NULL |
+| `SUM / AVG / MIN / MAX` | `sum / mean / min / max` | `sum` of all-NULL: SQL gives NULL, pandas gives 0 |
+| `GROUP BY k` + aggregates | `t.groupby('k', as_index=False).agg(n=('a', 'size'), s=('b', 'sum'))` | Named aggregation gives flat column names |
+| `HAVING COUNT(*) > 1` | `.query('n > 1')` after `agg`, or `groupby(...).filter(lambda g: len(g) > 1)` | `filter` returns the **original rows**, not group rows |
+| `GROUP BY ROLLUP(a)` | `pivot_table(..., margins=True)` or `concat` per-level groupbys | No direct equivalent |
+| `INNER / LEFT / RIGHT / FULL JOIN` | `merge(how='inner' / 'left' / 'right' / 'outer')` | See [24.2](#242-join-types) |
+| `CROSS JOIN` | `merge(how='cross')` | |
+| `JOIN ... USING (k)` / `ON a.x = b.y` | `on='k'` / `left_on='x', right_on='y'` | |
+| Semi-join (`WHERE EXISTS` / `IN (subquery)`) | `a[a['k'].isin(b['k'])]` | Never duplicates rows of `a` |
+| Anti-join (`NOT EXISTS` / `LEFT JOIN ... WHERE b.k IS NULL`) | `a[~a['k'].isin(b['k'])]` or `merge(indicator=True)` + `_merge == 'left_only'` | |
+| Non-equi join (`ON a.x BETWEEN b.lo AND b.hi`) | `merge(how='cross').query(...)`, `merge_asof`, or `IntervalIndex` | 26.6 |
+| `UNION ALL` | `pd.concat([a, b], ignore_index=True)` | |
+| `UNION` | `pd.concat([a, b]).drop_duplicates()` | |
+| `INTERSECT` / `EXCEPT` | `a.merge(b).drop_duplicates()` / `a[~a['k'].isin(b['k'])].drop_duplicates()` | Multi-column: `merge(indicator=True)` |
+| `CASE WHEN ... THEN ... ELSE ... END` | `np.select(conds, choices, default)`, `np.where`, `Series.case_when` (2.2+), `pd.cut` for ranges | |
+| `COALESCE(a, b, 0)` | `t['a'].fillna(t['b']).fillna(0)` / `combine_first` / `t[['a', 'b']].bfill(axis=1).iloc[:, 0]` | |
+| `NULLIF(a, 0)` | `t['a'].mask(t['a'] == 0)` | |
+| `CAST(a AS INT)` | `t['a'].astype('Int64')` | Use `pd.to_numeric(errors='coerce')` for dirty data (like `TRY_CAST`) |
+| `ROUND(a, 2)` | `t['a'].round(2)` | pandas/NumPy round half to even (`0.3125 -> 0.312`); SQL `ROUND` on NUMERIC rounds half away from zero (`0.313`). See 26.10 |
+| `ROW_NUMBER() OVER (PARTITION BY k ORDER BY v DESC)` | `sort_values` then `groupby('k').cumcount() + 1`, or `groupby('k')['v'].rank(method='first', ascending=False)` | |
+| `RANK()` / `DENSE_RANK()` | `rank(method='min')` / `rank(method='dense')` | `rank` returns float; cast with `astype('Int64')` |
+| `PERCENT_RANK()` / `CUME_DIST()` | `(rank('min') - 1) / (n - 1)` / `rank('max') / n` | `rank(pct=True)` is neither; it uses `method='average'` |
+| `NTILE(k)` | `np.array_split` helper (26.9) | `pd.qcut` buckets by value quantiles, not by row count |
+| `LAG(v, 1)` / `LEAD(v, 1)` | `groupby('k')['v'].shift(1)` / `.shift(-1)` | Sort first; `shift` uses physical row order |
+| `SUM(v) OVER (PARTITION BY k ORDER BY t)` | `groupby('k')['v'].cumsum()` | Ties: SQL's default `RANGE` frame includes peers (26.9) |
+| `AVG(v) OVER (... ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)` | `groupby('k')['v'].transform(lambda s: s.rolling(3, min_periods=1).mean())` | |
+| `AVG(v) OVER (PARTITION BY k)` | `groupby('k')['v'].transform('mean')` | Broadcasts the group value back to every row |
+| `FIRST_VALUE(v)` | `groupby('k')['v'].transform('first', skipna=False)` | Default `'first'` **skips NaN** (SQL does not) |
+| `WITH cte AS (...)` | intermediate variables, or a method chain with `assign` / `pipe` | |
+| `WITH RECURSIVE` | Python loop over iterative merges | 26.10 |
+| Correlated subquery (`v > (SELECT AVG(v) ... WHERE k = outer.k)`) | `t[t['v'] > t.groupby('k')['v'].transform('mean')]` | `transform` is the general tool for this |
+| Pivot via `SUM(CASE WHEN c = 'x' THEN v END)` | `pivot_table(index, columns, values, aggfunc)` | |
+| `UNPIVOT` / `UNION ALL` of columns | `melt(id_vars, value_vars)` | |
+| `STRING_AGG(name, ', ' ORDER BY name)` | `t.sort_values('name').groupby('k')['name'].agg(', '.join)` | |
+
+## 26.3 SELECT, WHERE, ORDER BY, LIMIT, DISTINCT
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+# SELECT name, salary FROM emp WHERE salary > 90;
+emp.loc[emp['salary'] > 90, ['name', 'salary']]          # Ana, Ben, Cai, Eve
+
+# WHERE salary > 90 AND dept_id = 10   (query: readable, supports @local_var)
+min_sal = 90
+emp.query('salary > @min_sal and dept_id == 10')         # Ana, Ben, Cai
+
+# WHERE dept_id IN (10, 30)
+emp[emp['dept_id'].isin([10, 30])]                       # Ana, Ben, Cai, Fay, Gus
+
+# WHERE salary BETWEEN 90 AND 100     (inclusive on both ends, as in SQL)
+emp[emp['salary'].between(90, 100)]                      # Ben, Cai, Dee, Eve
+
+# WHERE salary IS NULL
+emp[emp['salary'].isna()]                                # Gus
+
+# ORDER BY dept_id, salary DESC
+emp.sort_values(['dept_id', 'salary'], ascending=[True, False])
+# Ana Ben Cai | Eve Dee | Fay Gus(NaN last) | Hal(NA dept last)
+
+# ORDER BY salary DESC LIMIT 3 OFFSET 2
+emp.sort_values('salary', ascending=False).iloc[2:5]     # Cai, Eve, Dee
+
+# Top-3 with ties (FETCH FIRST 3 ROWS WITH TIES)
+emp.nlargest(3, 'salary', keep='all')                    # Ana, Ben, Cai
+
+# SELECT DISTINCT dept_id
+emp['dept_id'].drop_duplicates()                         # 10, 20, 30, <NA>
+emp['dept_id'].nunique()                                 # 3   (like COUNT(DISTINCT))
+emp['dept_id'].nunique(dropna=False)                     # 4
+```
+
+Things to notice:
+
+- **`sort_values` is stable only with `kind='stable'`** (or `'mergesort'`), and multi-column sorts are always stable. SQL makes no ordering guarantee among ties unless you add a tie-breaker column. In both languages, add a unique tie-breaker (such as `emp_id`) whenever the order matters, for example before `LIMIT` or `ROW_NUMBER`.
+- **`query` vs boolean masks.** `query` parses a string. It is readable, works mid-chain without naming the frame, and uses `numexpr` for large frames. Masks are explicit and work with any Series method. Inside `query`, refer to local variables with `@var` and to column names with spaces using backticks.
+- `nlargest` / `nsmallest` run a partial selection, O(n + k log k) average (quickselect on the k-th value, then sort only the survivors), instead of a full O(n log n) sort. Use them for top-k.
+
+## 26.4 NULL Semantics: SQL Three-Valued Logic vs NaN / NA
+
+SQL uses **three-valued logic**: any comparison with `NULL` yields `UNKNOWN`, and `WHERE` keeps only rows where the predicate is `TRUE`. Legacy pandas `NaN` is a float, and IEEE comparisons with it return plain `True` / `False`. The nullable dtypes (`Int64`, `boolean`, `"string"` (explicit `dtype='string'`, the pd.NA variant), `ArrowDtype`) return `pd.NA` and behave much closer to SQL. **The same pandas filter can therefore return different rows depending on the column's dtype.**
+
+> **pandas 3.x text columns.** pandas 3.x infers the default `str` dtype for text, which uses NaN semantics: `pd.Series(['a', None]) != 'b'` gives `[True, True]`, so the missing row is **included**, like the `float64` column and unlike SQL. Only an explicit `dtype='string'` gives `[True, <NA>]`.
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+# SQL:  SELECT name FROM emp WHERE salary <> 100;    -> Ana, Dee, Eve, Fay, Hal (Gus's NULL is excluded)
+emp[emp['salary'] != 100]['name'].tolist()
+# ['Ana', 'Dee', 'Eve', 'Fay', 'Gus', 'Hal']   <-- float64 NaN: NaN != 100 is True, so Gus is INCLUDED
+
+# SQL:  SELECT name FROM emp WHERE dept_id <> 10;    -> Dee, Eve, Fay, Gus
+emp[emp['dept_id'] != 10]['name'].tolist()
+# ['Dee', 'Eve', 'Fay', 'Gus']   <-- Int64: NA != 10 is <NA>, which a mask treats as False -> matches SQL
+
+# SQL-faithful version for any dtype: state the NULL handling explicitly
+emp[(emp['salary'] != 100) & emp['salary'].notna()]
+
+# NOT IN with a NULL in the list
+# SQL:  WHERE dept_id NOT IN (10, NULL)  -> returns NO rows (x <> NULL is UNKNOWN for every x)
+emp[~emp['dept_id'].isin([10, None])]['name'].tolist()
+# ['Dee', 'Eve', 'Fay', 'Gus', 'Hal']   <-- ~isin has no NOT IN trap. Hal is kept because None does not match an Int64 <NA> (only pd.NA does; for float64 only np.nan matches NaN)
+```
+
+| Situation | SQL | pandas (`float64` NaN / `object` None) | pandas nullable (`Int64`, `boolean`, `"string"`) |
+|---|---|---|---|
+| `x = NULL` | `UNKNOWN` (use `IS NULL`) | `NaN == NaN` is `False`; use `isna()` | `NA`; use `isna()` |
+| `x <> 5` when `x` is NULL | row excluded | `True`, so the row is **included** | `NA`, so the row is excluded in a mask |
+| `NOT IN (..., NULL)` | always empty | `~isin` has no trap. A missing value in the list matches only the same sentinel (`np.nan` with float NaN) | `~isin` has no trap. A missing value in the list matches only the same sentinel (`pd.NA` with Int64 NA) |
+| `COUNT(*)` vs `COUNT(x)` | rows vs non-null | `size()` vs `count()` | same |
+| `SUM(x)` when all NULL | `NULL` | `0.0` (use `sum(min_count=1)` to get NaN) | `0` |
+| `AVG(x)` | ignores NULLs | `mean()` skips NaN | same |
+| `GROUP BY` a NULL key | one NULL group | **dropped** unless `groupby(..., dropna=False)` | same |
+| `JOIN` on NULL keys | never match | **NaN matches NaN** in `merge` | `NA` matches `NA` |
+| `DISTINCT` / `UNION` | NULLs treated as equal | `drop_duplicates` treats NaN as equal | same |
+| `ORDER BY` placement | Postgres/Oracle: NULLs largest (last in ASC, first in DESC); MySQL/SQL Server/SQLite: NULLs smallest; DuckDB: last | `na_position='last'` in **both** directions | same |
+| `'a' \|\| NULL` | `NULL` (Postgres / SQL Server `CONCAT()` treat NULL as `''`; MySQL `CONCAT()` returns NULL) | `'a' + NaN` is NaN; `str.cat(na_rep='')` acts like `CONCAT` | `NA` |
+| `RANK() OVER (ORDER BY x)` | NULLs get a rank | NaN gets NaN rank (`na_option='keep'`); use `na_option='bottom'` | same |
+
+The two most common silent bugs:
+
+1. **A filter with `!=` on a float column keeps NaN rows.** SQL drops them.
+2. **`groupby` drops NaN keys by default.** Group counts then do not add up to `len(df)`. Pass `dropna=False` to match SQL's NULL group.
+
+Joins are a third trap. pandas matches NaN keys to each other, and SQL never matches NULL keys. The pandas docs state this explicitly for `merge`. Before a merge that should behave like SQL, drop rows with null keys: `left.dropna(subset=['k']).merge(right.dropna(subset=['k']), on='k')`.
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+a = pd.DataFrame({'k': [1.0, np.nan], 'x': [1, 2]})
+b = pd.DataFrame({'k': [np.nan, 1.0], 'y': [3, 4]})
+pd.merge(a, b, on='k')
+#      k  x  y
+# 0  1.0  1  4
+# 1  NaN  2  3     <-- SQL would NOT produce this row
+```
+
+## 26.5 GROUP BY, Aggregates, HAVING
+
+```sql
+SELECT dept_id,
+       COUNT(*)                   AS headcount,
+       COUNT(salary)              AS paid,
+       AVG(salary)                AS avg_sal,
+       MAX(salary)                AS max_sal,
+       COUNT(DISTINCT manager_id) AS n_mgrs
+FROM emp
+GROUP BY dept_id
+HAVING COUNT(*) >= 2 AND AVG(salary) > 85
+ORDER BY dept_id;
+```
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+agg = (emp.groupby('dept_id', as_index=False, dropna=False)   # dropna=False keeps the NULL group, as SQL does
+          .agg(headcount=('emp_id', 'size'),       # COUNT(*)
+               paid=('salary', 'count'),           # COUNT(salary)
+               avg_sal=('salary', 'mean'),
+               max_sal=('salary', 'max'),
+               n_mgrs=('manager_id', 'nunique')))  # COUNT(DISTINCT manager_id)
+#    dept_id  headcount  paid     avg_sal  max_sal  n_mgrs
+# 0       10          3     3  106.666667    120.0       1
+# 1       20          2     2   92.500000     95.0       1
+# 2       30          2     1   70.000000     70.0       1
+# 3     <NA>          1     1   60.000000     60.0       1
+
+having = agg.query('headcount >= 2 and avg_sal > 85').sort_values('dept_id')
+#    dept_id  headcount  paid     avg_sal  max_sal  n_mgrs
+# 0       10          3     3  106.666667    120.0       1
+# 1       20          2     2   92.500000     95.0       1
+
+# HAVING, but you want the ORIGINAL ROWS of qualifying groups (no SQL one-liner; needs a join or IN):
+emp.groupby('dept_id').filter(lambda g: len(g) >= 2 and g['salary'].mean() > 85)   # Ana..Eve
+
+# Faster equivalent of filter (vectorized; no Python call per group):
+g = emp.groupby('dept_id')['salary']
+emp[(g.transform('size') >= 2) & (g.transform('mean') > 85)]
+```
+
+Points interviewers probe:
+
+- **`size` vs `count`.** `size` counts rows (`COUNT(*)`). `count` counts non-null values (`COUNT(col)`). In department 30, `headcount=2` but `paid=1`, because Gus has no salary.
+- **`as_index=False`** (or `.reset_index()`) gives a flat frame like a SQL result. Without it, the group keys become the index.
+- **HAVING is just a filter after aggregation.** `groupby().filter(f)` is a different operation: it keeps the original rows. It also calls a Python function once per group, so on many groups prefer the `transform` mask.
+- **Categorical group keys.** In pandas 2.x, `observed=False` is the default and emits a FutureWarning, so unused categories appear as empty groups. In pandas 3.0 the default became `observed=True`, which matches SQL: only keys that actually occur appear.
+- **Several aggregates of one column:** `agg(lo=('salary', 'min'), hi=('salary', 'max'))`. Avoid `agg({'salary': ['min', 'max']})`, which produces MultiIndex columns.
+
+## 26.6 JOINs: Inner, Outer, Semi, Anti, Self, Non-Equi
+
+The `how=` options are in [24.2](#242-join-types). This section covers the joins SQL expresses that `merge` has no keyword for.
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+# INNER / LEFT / RIGHT / FULL OUTER
+emp.merge(dept, on='dept_id', how='inner')   # 7 rows (Hal has no dept; Legal has no emp)
+emp.merge(dept, on='dept_id', how='left')    # 8 rows, Hal -> dept_name NaN
+emp.merge(dept, on='dept_id', how='right')   # 8 rows, Legal -> name NaN
+emp.merge(dept, on='dept_id', how='outer')   # 9 rows
+
+# SEMI-JOIN: departments that have at least one employee
+# SQL: SELECT * FROM dept d WHERE EXISTS (SELECT 1 FROM emp e WHERE e.dept_id = d.dept_id);
+dept[dept['dept_id'].isin(emp['dept_id'])]            # Eng, Ops, Sales
+
+# ANTI-JOIN: departments with NO employees
+# SQL: ... WHERE NOT EXISTS (...)   or   LEFT JOIN emp e ON ... WHERE e.dept_id IS NULL
+dept[~dept['dept_id'].isin(emp['dept_id'])]           # Legal
+
+# Anti-join via indicator (works for multi-column keys)
+m = dept.merge(emp[['dept_id']].drop_duplicates(), on='dept_id', how='left', indicator=True)
+m.loc[m['_merge'] == 'left_only', dept.columns]       # Legal
+
+# Multi-column semi-join without merge: build a MultiIndex of keys
+# a[a.set_index(['k1', 'k2']).index.isin(b.set_index(['k1', 'k2']).index)]
+
+# SELF-JOIN: employees who earn more than their manager
+x = emp.merge(emp, left_on='manager_id', right_on='emp_id', suffixes=('', '_m'))
+x.loc[x['salary'] > x['salary_m'], ['name', 'salary', 'name_m', 'salary_m']]
+#   name  salary name_m  salary_m
+# 2  Eve    95.0    Dee      90.0
+```
+
+**Why use `isin` for a semi-join instead of an inner merge?** If the right side has duplicate keys, an inner merge **duplicates left rows** (one copy per match), and SQL's `EXISTS` never does. `isin` returns each left row at most once, and it does not need `drop_duplicates`.
+
+**`NOT IN` vs `NOT EXISTS` in SQL.** If the subquery returns even one NULL, `NOT IN` returns zero rows, while `NOT EXISTS` and `LEFT JOIN ... IS NULL` work as intended. pandas `~isin` behaves like `NOT EXISTS`. That is usually the behaviour you want, but it means `~isin` is **not** a faithful translation of a `NOT IN` that has the NULL trap.
+
+**Non-equi (range) joins.** `merge` supports only equality. Three options:
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+bands = pd.DataFrame({'band': ['low', 'mid', 'high'],
+                      'lo': [0, 80, 100], 'hi': [80, 100, 1_000]})
+
+# 1. Cross join + filter: simple, but O(n*m) memory. Fine for small dimension tables.
+# SQL: SELECT e.name, b.band FROM emp e JOIN bands b ON e.salary >= b.lo AND e.salary < b.hi
+(emp.merge(bands, how='cross')
+    .query('salary >= lo and salary < hi')[['name', 'band']])
+
+# 2. IntervalIndex lookup: O(n log m), non-overlapping intervals
+idx = pd.IntervalIndex.from_arrays(bands['lo'], bands['hi'], closed='left')
+pos = idx.get_indexer(emp['salary'])                    # -1 where no band (NaN salary)
+emp.assign(band=np.where(pos >= 0, bands['band'].to_numpy()[pos], None))
+
+# 3. merge_asof: "most recent row at or before" (sorted keys). See 25.1.
+```
+
+## 26.7 UNION, UNION ALL, INTERSECT, EXCEPT
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+a = emp.loc[emp['dept_id'].isin([10, 20]), ['name']]   # Ana Ben Cai Dee Eve
+b = emp.loc[emp['salary'] >= 95, ['name']]              # Ana Ben Cai Eve
+
+pd.concat([a, b], ignore_index=True)                    # UNION ALL  -> 9 rows
+pd.concat([a, b], ignore_index=True).drop_duplicates()  # UNION      -> Ana Ben Cai Dee Eve
+a.merge(b).drop_duplicates()                            # INTERSECT  -> Ana Ben Cai Eve (merges on all shared cols)
+a[~a['name'].isin(b['name'])].drop_duplicates()         # EXCEPT     -> Dee
+```
+
+- **Column alignment.** SQL `UNION` matches columns **by position** and requires compatible types. `pd.concat` aligns **by column name** and fills missing columns with NaN. Rename the columns before concatenating if the names differ.
+- **`UNION` deduplicates and is therefore slower** (in SQL it sorts or hashes). Use `UNION ALL` / plain `concat` unless you actually need deduplication. The same advice applies in both languages.
+- `INTERSECT` / `EXCEPT` are set operations, so deduplicate the result. For multi-column rows, use `merge(how='left', indicator=True)` and filter on `_merge`.
+
+## 26.8 CASE WHEN, COALESCE, NULLIF, CAST
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+# CASE WHEN salary >= 100 THEN 'high' WHEN salary >= 80 THEN 'mid' ELSE 'low' END
+emp['band'] = np.select(
+    [emp['salary'] >= 100, emp['salary'] >= 80],      # evaluated in order, first True wins (like CASE)
+    ['high', 'mid'],
+    default='low')
+# Gus (NULL salary) -> 'low' in BOTH: NULL >= 100 is UNKNOWN in SQL, NaN >= 100 is False in pandas -> ELSE
+
+# Two-way CASE -> np.where
+emp['tenure'] = np.where(emp['hire_date'] < '2020-01-01', 'senior', 'junior')
+
+# pandas 2.2+: Series.case_when -- the CALLER supplies the ELSE values
+emp['band2'] = pd.Series('low', index=emp.index).case_when([
+    (emp['salary'] >= 100, 'high'),
+    (emp['salary'] >= 80,  'mid'),
+])
+
+# Range buckets -> pd.cut (right=False makes intervals [lo, hi) like ">= lo AND < hi")
+emp['band3'] = pd.cut(emp['salary'], bins=[-np.inf, 80, 100, np.inf],
+                      right=False, labels=['low', 'mid', 'high'])   # Gus -> NaN (not 'low')
+
+# COALESCE(manager_id, emp_id)
+emp['manager_id'].fillna(emp['emp_id'])               # [1, 1, 1, 4, 4, 6, 6, 1]
+emp['manager_id'].combine_first(emp['emp_id'])        # same; also aligns on index
+# COALESCE(manager_id, dept_id) -- many columns: first non-null left-to-right
+emp[['manager_id', 'dept_id']].bfill(axis=1).iloc[:, 0]
+
+# NULLIF(salary, 100)
+emp['salary'].mask(emp['salary'] == 100)              # 100 -> NaN
+
+# CAST / TRY_CAST
+pd.to_numeric(pd.Series(['1', 'x', '3']), errors='coerce').astype('Int64')   # [1, <NA>, 3]
+```
+
+`np.select` vs `np.where` vs `case_when`. `np.select` returns a NumPy array. String choices with `default=np.nan` raise a `TypeError` under NumPy 2 (NumPy 1.x silently stored the string `"nan"`). Pass `default=None` to get an `object` array with `None`, or use `case_when` / `pd.Series(..., dtype="string")`. Its conditions are evaluated eagerly, all of them, and it does not short-circuit. `case_when` keeps pandas dtypes and the index. Avoid `apply(lambda row: ...)` for CASE logic: it is a Python loop, often 100x slower on large frames ([32.1](#321-vectorize-dont-iterate)).
+
+## 26.9 Window Functions: Ranking, LAG/LEAD, Running and Moving Aggregates
+
+The general rule: **`PARTITION BY` becomes `groupby`. `ORDER BY` inside `OVER` becomes a `sort_values` beforehand. The window function becomes a groupby method that returns a result the same length as the input** (`rank`, `cumcount`, `shift`, `cumsum`, `transform`, `rolling`).
+
+### Ranking: ROW_NUMBER, RANK, DENSE_RANK
+
+```sql
+SELECT dept_id, name, salary,
+       ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC, emp_id) AS rn,
+       RANK()       OVER (PARTITION BY dept_id ORDER BY salary DESC)         AS rk,
+       DENSE_RANK() OVER (PARTITION BY dept_id ORDER BY salary DESC)         AS drk
+FROM emp;
+```
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+w = emp.sort_values(['dept_id', 'salary', 'emp_id'], ascending=[True, False, True])
+g = w.groupby('dept_id', dropna=False)['salary']
+w = w.assign(
+    rn =w.groupby('dept_id', dropna=False).cumcount() + 1,          # ROW_NUMBER (uses current order)
+    rn2=g.rank(method='first', ascending=False, na_option='bottom'),  # ROW_NUMBER via rank
+    rk =g.rank(method='min',   ascending=False),                    # RANK
+    drk=g.rank(method='dense', ascending=False),                    # DENSE_RANK
+)
+#    dept_id name  salary  rn  rn2   rk  drk
+# 0       10  Ana   120.0   1  1.0  1.0  1.0
+# 1       10  Ben   100.0   2  2.0  2.0  2.0
+# 2       10  Cai   100.0   3  3.0  2.0  2.0     <-- tie: RANK=2, DENSE_RANK=2, ROW_NUMBER=3
+# 4       20  Eve    95.0   1  1.0  1.0  1.0
+# 3       20  Dee    90.0   2  2.0  2.0  2.0
+# 5       30  Fay    70.0   1  1.0  1.0  1.0
+# 6       30  Gus     NaN   2  2.0  NaN  NaN     <-- SQL ranks the NULL (2); pandas rank keeps NaN by default
+# 7     <NA>  Hal    60.0   1  1.0  1.0  1.0
+
+# Top-2 per department (the classic "top-N per group")
+w[w['rn'] <= 2]
+```
+
+| SQL | pandas `rank(method=...)` | Ties 100, 100 after 120 give |
+|---|---|---|
+| `ROW_NUMBER()` | `'first'` (order of appearance, so sort by the tie-breaker first) or `cumcount() + 1` | 1, 2, 3 |
+| `RANK()` | `'min'` | 1, 2, 2 (next is 4) |
+| `DENSE_RANK()` | `'dense'` | 1, 2, 2 (next is 3) |
+| (none) | `'average'` (default) | 1, 2.5, 2.5 |
+| (none) | `'max'` | 1, 3, 3 |
+
+Pitfalls: `rank` returns `float64`, so use `.astype('Int64')`. `rank` ignores the frame's row order except under `method='first'`. Hal's NULL `dept_id` group disappears unless you pass `dropna=False`.
+
+### LAG / LEAD, running totals, moving averages, PARTITION BY aggregates
+
+```sql
+SELECT dept_id, name, hire_date, salary,
+       LAG(salary)  OVER w AS prev_sal,
+       LEAD(salary) OVER w AS next_sal,
+       SUM(salary)  OVER (w ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running,
+       AVG(salary)  OVER (w ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)         AS mov_avg_2,
+       AVG(salary)  OVER (PARTITION BY dept_id)                               AS dept_avg,
+       salary / SUM(salary) OVER (PARTITION BY dept_id)                       AS pct_of_dept
+FROM emp
+WINDOW w AS (PARTITION BY dept_id ORDER BY hire_date);
+```
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+s  = emp.sort_values(['dept_id', 'hire_date'])          # ORDER BY inside OVER
+gs = s.groupby('dept_id', dropna=False)['salary']       # PARTITION BY
+s = s.assign(
+    prev_sal    = gs.shift(1),                          # LAG(salary)
+    next_sal    = gs.shift(-1),                         # LEAD(salary)
+    delta       = gs.diff(),                            # salary - LAG(salary)
+    running     = gs.cumsum(),                          # running total
+    mov_avg_2   = gs.transform(lambda x: x.rolling(2, min_periods=1).mean()),
+    dept_avg    = gs.transform('mean'),                 # AVG() OVER (PARTITION BY)
+    pct_of_dept = s['salary'] / gs.transform('sum'),
+)
+s[['dept_id', 'name', 'salary', 'prev_sal', 'next_sal', 'running', 'mov_avg_2', 'dept_avg']]
+#    dept_id name  salary  prev_sal  next_sal  running  mov_avg_2    dept_avg
+# 0       10  Ana   120.0       NaN     100.0    120.0      120.0  106.666667
+# 1       10  Ben   100.0     120.0     100.0    220.0      110.0  106.666667
+# 2       10  Cai   100.0     100.0       NaN    320.0      100.0  106.666667
+# 3       20  Dee    90.0       NaN      95.0     90.0       90.0   92.500000
+# 4       20  Eve    95.0      90.0       NaN    185.0       92.5   92.500000
+# 5       30  Fay    70.0       NaN       NaN     70.0       70.0   70.000000
+# 6       30  Gus     NaN      70.0       NaN      NaN       70.0   70.000000
+# 7     <NA>  Hal    60.0       NaN       NaN     60.0       60.0   60.000000
+```
+
+Details that commonly trip people up:
+
+- **`shift` is positional.** It does not sort. Forgetting the `sort_values` gives silently wrong `LAG` values. `LAG(v, 1, 0)` (with a default) becomes `shift(1, fill_value=0)`.
+- **Running total over NULL.** SQL `SUM` skips NULLs, so Gus's running total would be 70. pandas `cumsum` returns NaN at the NaN row, then continues from the previous total on later rows. Use `gs.transform(lambda x: x.fillna(0).cumsum())` if you need SQL's output.
+- **`RANGE` vs `ROWS` default frame.** `SUM(v) OVER (PARTITION BY k ORDER BY t)` with no frame clause uses `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`. Rows tied on `t` (peers) therefore all get the same running total, which includes every peer. `cumsum` behaves like `ROWS`. To emulate `RANGE`, take `gs.cumsum()` and then broadcast the last value within each `(k, t)` group: `s.assign(c=gs.cumsum()).groupby(['k', 't'])['c'].transform('last')`.
+- **Time-based frames.** `RANGE BETWEEN INTERVAL '6 days' PRECEDING AND CURRENT ROW` (a 7-calendar-day window) becomes `s.set_index('ts').groupby('k')['v'].rolling('7D').sum()`; `rolling('7D')` is (t-7D, t]. For SQL's `INTERVAL '7 days' PRECEDING` (inclusive), use `rolling('7D', closed='both')`. See [28.7](#287-time-aware-rolling-windows).
+- **`groupby().rolling()` returns a MultiIndex** of `(group key, original index)`. Either drop the group level with `.reset_index(level=0, drop=True)` before assigning it back, or use `transform(lambda x: x.rolling(...))` as above, which keeps the original index.
+- **`FIRST_VALUE` / `LAST_VALUE`.** `transform('first')` returns the first **non-null** value (like `FIRST_VALUE ... IGNORE NULLS`). Use `transform('first', skipna=False)` (pandas 2.2.1+) or `transform(lambda x: x.iloc[0])` for SQL's default. In SQL, `LAST_VALUE` with the default frame returns the *current row* (or its last peer), because the frame ends at the current row. This is a classic SQL gotcha. pandas `transform('last')` returns the partition's last value.
+
+### PERCENT_RANK, CUME_DIST, NTILE
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+g = emp.groupby('dept_id')['salary']
+n = g.transform('count')
+pct_rank  = (g.rank(method='min') - 1) / (n - 1)   # PERCENT_RANK(); NaN when n == 1 (SQL returns 0)
+cume_dist = g.rank(method='max') / n               # CUME_DIST()
+
+def ntile(x: pd.Series, k: int) -> pd.Series:
+    """SQL NTILE(k) over rows already in the desired order: the first (len % k) buckets get one extra row."""
+    parts = np.array_split(np.arange(len(x)), k)
+    return pd.Series(np.concatenate([np.full(len(p), i + 1) for i, p in enumerate(parts)]),
+                     index=x.index)
+
+paid = emp.dropna(subset=['salary']).sort_values(['salary', 'emp_id'])
+ntile(paid['salary'], 4)    # 7 rows -> bucket sizes 2, 2, 2, 1  (Hal Fay | Dee Eve | Ben Cai | Ana)
+```
+
+## 26.10 CTEs and Subqueries: Method Chaining and pipe
+
+A CTE names an intermediate result. In pandas, that is either a **named variable** or a **step in a method chain**. `assign` (with lambdas) and `pipe` make chains read top-to-bottom like a sequence of CTEs.
+
+```sql
+WITH paid AS (
+    SELECT * FROM emp WHERE salary IS NOT NULL
+), dept_stats AS (
+    SELECT dept_id, COUNT(*) AS n, SUM(salary) AS payroll
+    FROM paid GROUP BY dept_id HAVING COUNT(*) >= 2
+), ranked AS (
+    SELECT p.*,
+           ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC, emp_id) AS rn,
+           salary - LEAD(salary) OVER (PARTITION BY dept_id ORDER BY salary DESC, emp_id) AS gap_to_next
+    FROM paid p
+)
+SELECT d.dept_name, r.name, r.salary, r.rn, r.gap_to_next,
+       ROUND(r.salary / s.payroll, 3) AS share
+FROM ranked r
+JOIN dept_stats s USING (dept_id)
+JOIN dept d       USING (dept_id)
+WHERE r.rn <= 2
+ORDER BY d.dept_name, r.rn;
+```
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+def top_n_per_group(df: pd.DataFrame, key: str, n: int) -> pd.DataFrame:
+    return df[df.groupby(key, dropna=False).cumcount() < n]   # reusable "CTE" via pipe
+
+paid = emp.dropna(subset=['salary'])                   # CTE: paid
+
+dept_stats = (paid.groupby('dept_id', as_index=False)  # CTE: dept_stats
+                  .agg(n=('emp_id', 'size'), payroll=('salary', 'sum'))
+                  .query('n >= 2'))
+
+result = (
+    paid.sort_values(['dept_id', 'salary', 'emp_id'], ascending=[True, False, True])
+        .assign(rn=lambda d: d.groupby('dept_id', dropna=False).cumcount() + 1,
+                gap_to_next=lambda d: d['salary'] - d.groupby('dept_id', dropna=False)['salary'].shift(-1))
+        .pipe(top_n_per_group, key='dept_id', n=2)     # WHERE rn <= 2
+        .merge(dept_stats, on='dept_id')               # JOIN dept_stats (inner -> applies HAVING)
+        .merge(dept, on='dept_id')
+        .assign(share=lambda d: (d['salary'] / d['payroll']).round(3))
+        .sort_values(['dept_name', 'rn'])
+        [['dept_name', 'name', 'salary', 'rn', 'gap_to_next', 'share']]
+        .reset_index(drop=True)
+)
+#   dept_name name  salary  rn  gap_to_next  share
+# 0       Eng  Ana   120.0   1         20.0  0.375
+# 1       Eng  Ben   100.0   2          0.0  0.312
+# 2       Ops  Eve    95.0   1          5.0  0.514
+# 3       Ops  Dee    90.0   2          NaN  0.486
+```
+
+Ben's share differs: SQL `ROUND(0.3125, 3)` = 0.313 (half away from zero), but pandas/NumPy `round` uses banker's rounding (half to even) and gives 0.312. To match SQL, use `np.floor(x * 1000 + 0.5) / 1000` for positive values, or `Decimal.quantize(..., rounding=ROUND_HALF_UP)`.
+
+Note that `assign(lambda d: ...)` sees the frame **as it is at that step of the chain**, the same way each CTE sees the CTE before it. Department 30 (Sales) drops out because only one employee is paid. Hal drops out because his NULL group has only one row, so `dept_stats` filters it out. Without `dropna=False` in the window steps, Hal's `rn` would be NaN, and the whole `rn` column would silently become float.
+
+Do not rely on the inner join to remove NULL keys the way SQL does. If `dept_stats` contained an NA `dept_id` row, pandas would match it to Hal's NA key (26.4).
+
+**Subquery translations:**
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+# Scalar subquery: WHERE salary > (SELECT AVG(salary) FROM emp)
+emp[emp['salary'] > emp['salary'].mean()]
+
+# Correlated subquery: WHERE salary > (SELECT AVG(salary) FROM emp i WHERE i.dept_id = o.dept_id)
+emp[emp['salary'] > emp.groupby('dept_id')['salary'].transform('mean')]       # Ana, Eve
+
+# IN (subquery): WHERE dept_id IN (SELECT dept_id FROM dept WHERE dept_name LIKE 'E%')
+emp[emp['dept_id'].isin(dept.loc[dept['dept_name'].str.startswith('E'), 'dept_id'])]
+```
+
+**Recursive CTE** (`WITH RECURSIVE`, for example walking an org chart) has no pandas equivalent. Write a loop in which each iteration plays the role of the recursive term:
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+# WITH RECURSIVE chain AS (SELECT emp_id, 0 AS lvl FROM emp WHERE manager_id IS NULL
+#                          UNION ALL
+#                          SELECT e.emp_id, c.lvl + 1 FROM emp e JOIN chain c ON e.manager_id = c.emp_id)
+level = {}
+frontier = emp.loc[emp['manager_id'].isna(), 'emp_id']
+depth = 0
+while len(frontier) and depth < len(emp):            # depth guard protects against cycles
+    level.update(dict.fromkeys(frontier.tolist(), depth))
+    frontier = emp.loc[emp['manager_id'].isin(frontier) & ~emp['emp_id'].isin(level.keys()), 'emp_id']
+    depth += 1
+emp['level'] = emp['emp_id'].map(level)              # Ana/Dee/Fay 0, the rest 1
+```
+
+## 26.11 Pivot and Unpivot
+
+```sql
+-- Pivot via conditional aggregation: payroll by department and hiring era
+SELECT d.dept_name,
+       SUM(CASE WHEN e.hire_date <  '2021-01-01' THEN e.salary ELSE 0 END) AS before_2021,
+       SUM(CASE WHEN e.hire_date >= '2021-01-01' THEN e.salary ELSE 0 END) AS from_2021
+FROM emp e JOIN dept d USING (dept_id)
+GROUP BY d.dept_name;
+```
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+wide = (emp.merge(dept, on='dept_id')
+           .assign(era=lambda d: np.where(d['hire_date'] < '2021-01-01', 'before_2021', 'from_2021'))
+           .pivot_table(index='dept_name', columns='era', values='salary',
+                        aggfunc='sum', fill_value=0)
+           .reset_index()
+           .rename_axis(columns=None))
+#   dept_name  before_2021  from_2021
+# 0       Eng        220.0      100.0
+# 1       Ops         90.0       95.0
+# 2     Sales         70.0        0.0
+
+# UNPIVOT (or UNION ALL of one SELECT per column) -> melt
+long = wide.melt(id_vars='dept_name', var_name='era', value_name='payroll')
+#   dept_name          era  payroll
+# 0       Eng  before_2021    220.0
+# 1       Ops  before_2021     90.0
+# ...                                (6 rows)
+```
+
+- `pivot` raises on duplicate `(index, columns)` pairs, and `pivot_table` aggregates them. See [20.4](#204-pivot-vs-pivot_table).
+- `pd.crosstab(a, b)` is the shortcut for `COUNT(*) ... GROUP BY a, b` pivoted. `margins=True` adds `ROLLUP`-style totals.
+- Sales `from_2021` shows `0` because of `fill_value=0`. Gus (hired 2023) has a NULL salary, so the sum over his era is 0 in pandas. SQL `SUM(CASE ... ELSE 0)` also yields 0, but `SUM(CASE ... END)` without `ELSE` yields NULL.
+
+## 26.12 String and Date Functions
+
+| SQL | pandas | Notes |
+|---|---|---|
+| `UPPER(s)` / `LOWER(s)` | `s.str.upper()` / `s.str.lower()` | |
+| `TRIM(s)` / `LTRIM` / `RTRIM` | `s.str.strip()` / `lstrip` / `rstrip` | |
+| `LENGTH(s)` | `s.str.len()` | |
+| `SUBSTRING(s, 2, 3)` | `s.str.slice(1, 4)` or `s.str[1:4]` | SQL is **1-based** with a length argument; pandas is 0-based with an exclusive end |
+| `LEFT(s, 3)` / `RIGHT(s, 3)` | `s.str[:3]` / `s.str[-3:]` | |
+| `s1 \|\| '-' \|\| s2` (ANSI / Postgres) | `s1 + '-' + s2` | NaN propagates, like `\|\|` with NULL |
+| `CONCAT(s1, s2)` / `CONCAT_WS('-', ...)` | `s1.str.cat(s2, sep='-', na_rep='')` | `na_rep=''` mimics Postgres `CONCAT` ignoring NULL (MySQL `CONCAT` returns NULL instead) |
+| `LIKE 'ab%'` / `'%ab'` / `'%ab%'` | `str.startswith('ab')` / `str.endswith('ab')` / `str.contains('ab', regex=False)` | |
+| `LIKE 'a_c'` | `str.fullmatch('a.c')` | `_` becomes `.`, `%` becomes `.*` |
+| `ILIKE` | `str.contains('ab', case=False)` | |
+| `REPLACE(s, 'a', 'b')` | `s.str.replace('a', 'b', regex=False)` | `regex=False` is the default since pandas 2.0 |
+| `REGEXP_REPLACE` / `REGEXP_SUBSTR` | `str.replace(pat, repl, regex=True)` / `str.extract(r'(pat)')` | |
+| `SPLIT_PART(s, '@', 2)` | `s.str.split('@').str[1]` | |
+| `POSITION('x' IN s)` / `STRPOS` | `s.str.find('x') + 1` | SQL returns 0 if absent; pandas `find` returns -1, so +1 also gives 0 |
+| `LPAD(s, 5, '0')` | `s.str.pad(5, fillchar='0')` or `s.str.zfill(5)` | |
+| `STRING_AGG(s, ',' ORDER BY s)` / `GROUP_CONCAT` | `df.sort_values('s').groupby('k')['s'].agg(','.join)` | Drop NaN first; `join` fails on floats |
+| `EXTRACT(YEAR FROM d)` | `d.dt.year` | also `.dt.month`, `.dt.dayofweek` (Mon=0) |
+| `DATE_TRUNC('month', d)` | `d.dt.to_period('M').dt.to_timestamp()` | `d.dt.floor('D')` / `'h'` for fixed-size units |
+| `d + INTERVAL '30 days'` | `d + pd.Timedelta(days=30)` | |
+| `d + INTERVAL '1 month'` | `d + pd.DateOffset(months=1)` | Calendar-aware; Jan 31 becomes Feb 28/29 |
+| `DATEDIFF(day, a, b)` / `b - a` | `(b - a).dt.days` | |
+| `CURRENT_DATE` | `pd.Timestamp.today().normalize()` | |
+
+```python
+# fragment -- requires pandas; uses emp/dept from 26.1
+u = pd.DataFrame({'k': [1, 1, 2, 2],
+                  'email': ['  Ana@Example.com', 'ben@corp.io ', None, 'cai.x@example.com']})
+e = u['email'].str.strip().str.lower()
+e.str.split('@').str[1]                     # SPLIT_PART(email, '@', 2): example.com, corp.io, NaN, example.com
+e.str.extract(r'^([^@.]+)', expand=False)   # REGEXP_SUBSTR: ana, ben, NaN, cai
+e[e.str.endswith('example.com', na=False)]  # LIKE '%example.com'; na=False keeps the mask boolean
+(u.dropna(subset=['email'])                 # STRING_AGG(TRIM(email), ';') GROUP BY k
+  .assign(email=lambda d: d['email'].str.strip())
+  .groupby('k')['email'].agg(';'.join))
+# k
+# 1    Ana@Example.com;ben@corp.io
+# 2              cai.x@example.com
+
+emp['hire_date'].dt.to_period('M').dt.to_timestamp()   # DATE_TRUNC('month', hire_date)
+(pd.Timestamp('2025-01-01') - emp['hire_date']).dt.days  # days of tenure on 2025-01-01
+```
+
+The `.str` methods propagate missing values. A `.str` predicate used as a mask on an `object` column can contain NaN, and the mask then fails with "Cannot mask with non-boolean array containing NA / NaN values". Pass `na=False` to `str.contains` / `startswith` / `endswith`, which matches SQL, where `NULL LIKE ...` is not TRUE. More detail in [14. The .str Accessor](#14-the-str-accessor).
+
+## 26.13 Translation Checklist and Performance Notes
+
+**Checklist when converting a SQL query:**
+
+1. Write the chain in **logical order**: join, filter, group, aggregate, having, window, project, distinct, sort, limit.
+2. For every column that can be NULL, decide what `!=`, `~isin`, `groupby`, and `merge` should do with it (26.4).
+3. Sort before any order-dependent window (`shift`, `cumsum`, `cumcount`, `rolling`, `rank(method='first')`), and include a unique tie-breaker.
+4. Use `validate='m:1'` on lookup joins to catch duplicate keys that would multiply rows.
+5. Compare row counts at each step. Unexpected changes usually come from fan-out (`merge`) or dropped NULL groups (`groupby`).
+
+**Performance:**
+
+| Concern | Guidance |
+|---|---|
+| `groupby().filter(lambda ...)` / `apply` | Calls Python once per group. Prefer `transform` masks and built-in aggregates. |
+| `isin` vs `merge` for semi-joins | `isin` hashes the right side once and returns a mask. It is O(n + m) and never fans out. |
+| Many-key joins | Convert string keys to `category` with the **same categories** on both sides, or join on integer surrogate keys. |
+| Large joins / aggregations | DuckDB or Polars on the same DataFrames, multithreaded and out-of-core ([35.4](#354-when-to-use-duckdb-alongside-pandas)). |
+| `query` / `eval` | Help mainly on large frames (100k+ rows) with `numexpr` installed. On small frames, parsing overhead makes them slower than masks. |
+| Cross join for range joins | O(n*m) memory. Use `IntervalIndex` or `merge_asof` once either side is large. |
+
+## 26.14 Interview Questions
+
+**Q1. Translate `SELECT dept_id, COUNT(*) FROM emp GROUP BY dept_id` to pandas. Why might your counts not add up to `len(emp)`?**
+
+`emp.groupby('dept_id', dropna=False).size()`. Without `dropna=False`, pandas drops rows whose key is NaN/NA, so Hal's NULL department disappears and the counts total 7, not 8. SQL keeps NULL as its own group. Also, `count()` instead of `size()` would count non-null values in each column (`COUNT(col)`), not rows. The usual follow-up is: "which one does `value_counts()` match?" `value_counts()` also drops NaN unless you pass `dropna=False`.
+
+**Q2. Why can `df[df['x'] != 5]` return more rows than `SELECT * FROM t WHERE x <> 5`?**
+
+In SQL, `NULL <> 5` is UNKNOWN, and `WHERE` keeps only TRUE rows. With a `float64` NaN, `NaN != 5` evaluates to `True`, so pandas keeps the row. With nullable dtypes (`Int64`, explicit `dtype='string'`), the comparison yields `pd.NA`, and a mask treats it as False, which matches SQL. Pitfall: pandas 3.x infers the default `str` dtype for text, which uses NaN semantics, so `!=` returns True for a missing string and the row is kept, like `float64`. The robust translation is `df[df['x'].ne(5) & df['x'].notna()]`. This is one of the most common silent bugs when porting SQL.
+
+**Q3. Implement ROW_NUMBER, RANK, and DENSE_RANK per department by salary descending. What happens with ties?**
+
+Sort by `['dept_id', 'salary', 'emp_id']` with `ascending=[True, False, True]`. Then ROW_NUMBER is `groupby('dept_id').cumcount() + 1` (or `rank(method='first', ascending=False)`), RANK is `rank(method='min', ascending=False)`, and DENSE_RANK is `rank(method='dense', ascending=False)`. For salaries 120, 100, 100, 90, the results are 1,2,3,4 / 1,2,2,4 / 1,2,2,3. `method='first'` breaks ties by order of appearance, so the result is deterministic only if you sorted by a tie-breaker. Pitfalls: `rank` returns floats, and NaN values get NaN ranks unless you pass `na_option='bottom'`.
+
+**Q4. Write a semi-join and an anti-join in pandas. Why not use an inner merge for the semi-join?**
+
+Semi-join: `a[a['k'].isin(b['k'])]`. Anti-join: `a[~a['k'].isin(b['k'])]`, or `a.merge(b[['k']].drop_duplicates(), how='left', indicator=True).query('_merge == "left_only"')` for multi-column keys. An inner merge returns one copy of each `a` row **per matching `b` row**, so duplicate keys in `b` inflate the result. It also brings in `b`'s columns. `EXISTS` and `isin` return each `a` row at most once.
+
+**Q5. What is the NULL trap in `NOT IN`, and does `~isin` have it?**
+
+`x NOT IN (1, NULL)` expands to `x <> 1 AND x <> NULL`. The second term is UNKNOWN, so the whole predicate is never TRUE and the query returns no rows. That is why `NOT EXISTS` (or `LEFT JOIN ... WHERE b.k IS NULL`) is preferred. pandas `~isin` treats a missing value in the list as an ordinary value that matches only the same sentinel (`np.nan` for float NaN, `pd.NA` for `Int64` NA; `None` matches neither), so it behaves like `NOT EXISTS`. A literal translation of a buggy `NOT IN` will therefore not reproduce the empty result.
+
+**Q6. How do you compute a 7-day moving average of daily revenue per store, and how does it differ from a 7-row window?**
+
+7-row window (`ROWS BETWEEN 6 PRECEDING AND CURRENT ROW`): `df.sort_values(['store', 'date']).groupby('store')['rev'].transform(lambda s: s.rolling(7, min_periods=1).mean())`. 7-day window (`RANGE BETWEEN INTERVAL '6 days' PRECEDING AND CURRENT ROW`): set the date as the index and use a time offset, `df.set_index('date').groupby('store')['rev'].rolling('7D').mean()`. The two agree only when there is exactly one row per day with no gaps. If days are missing, the row-based window reaches further back in time. Decide whether missing days count as zero (`resample('D').sum()` first) or as absent.
+
+**Q7. Translate a query with a correlated subquery: employees earning more than their department's average.**
+
+`emp[emp['salary'] > emp.groupby('dept_id')['salary'].transform('mean')]`. `transform` broadcasts each group's mean back to every row of that group, which is exactly what the correlated subquery computes for each outer row. It is vectorized, O(n). A naive translation that loops over rows and filters the frame each time is O(n^2).
+
+**Q8. How do you get the latest record per user (dedup keeping the newest)?**
+
+`df.sort_values(['user_id', 'ts']).drop_duplicates('user_id', keep='last')`. Alternatives are `df.loc[df.groupby('user_id')['ts'].idxmax()]` or `groupby('user_id').tail(1)` after sorting. SQL: `ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY ts DESC) = 1`, or Postgres `DISTINCT ON`. Follow-up: if two rows tie on `ts`, add a tie-breaker to the sort. On an all-NaN group, `idxmax` returns NaN in pandas 2.2 and raises `ValueError` in 3.x, so drop NaN timestamps first.
+
+**Q9. How do you compute a running total that matches SQL's default `SUM(v) OVER (PARTITION BY k ORDER BY t)` exactly?**
+
+With no frame clause, the SQL default is `RANGE UNBOUNDED PRECEDING`. Peer rows (ties on `t`) all receive the total up to and including the last peer. `groupby('k')['v'].cumsum()` is `ROWS`, so it increments within ties. To match SQL exactly: `c = df.sort_values(['k', 't']).groupby('k')['v'].cumsum()`, then `df.assign(c=c).groupby(['k', 't'])['c'].transform('last')`. Also, SQL `SUM` skips NULL, but `cumsum` leaves NaN at that row. Use `fillna(0)` before `cumsum` if needed.
+
+**Q10. `UNION` vs `UNION ALL` vs `pd.concat`: what differs?**
+
+`UNION ALL` is `pd.concat([a, b], ignore_index=True)`. `UNION` adds `.drop_duplicates()`, which is an extra hash pass, so prefer `UNION ALL` when duplicates are impossible or acceptable. SQL aligns columns **by position**, while `concat` aligns **by name** and fills missing columns with NaN (which can also upcast `int` to `float`). Both treat NULLs as equal when deduplicating.
+
+**Q11. When would you leave pandas and write the query in SQL (DuckDB) instead?**
+
+When the data does not fit comfortably in memory, when there are multi-way joins with large aggregations that benefit from a query optimizer and multithreading, or when the logic is naturally relational (several CTEs and window functions) and the SQL is clearer. DuckDB queries pandas frames in place (`duckdb.sql('SELECT ... FROM df').df()`), so you can move only the heavy step. Stay in pandas for row-aligned feature engineering, time-series resampling, and interactive work.
+
+---
+
 # Part 7: Time Series
 
 ---
 
-# 26. Timestamps, Periods, Timedeltas
+# 27. Timestamps, Periods, Timedeltas
 
 ---
 
-## 26.1 The Time-Aware Type Family
+## 27.1 The Time-Aware Type Family
 
 | Type | Represents | Backed By | Example |
 |---|---|---|---|
@@ -2942,7 +3704,7 @@ df.update(patch)
 | `TimedeltaIndex` | Array of durations | NumPy | array of latencies |
 | `DateOffset` | A calendar-aware offset | Object | `MonthEnd()`, `BusinessDay()` |
 
-## 26.2 Timestamp
+## 27.2 Timestamp
 
 ```python
 ts = pd.Timestamp('2024-06-15 12:30:45')
@@ -2965,7 +3727,7 @@ ts + pd.Timedelta('1 day')
 ts - pd.Timestamp('2024-01-01')   # Timedelta
 ```
 
-## 26.3 Timedelta
+## 27.3 Timedelta
 
 ```python
 td = pd.Timedelta(days=2, hours=3, minutes=30)
@@ -2982,7 +3744,7 @@ ts + td                     # Timestamp
 2 * td                      # Timedelta
 ```
 
-## 26.4 Period
+## 27.4 Period
 
 ```python
 p = pd.Period('2024-06', freq='M')        # June 2024 (whole month)
@@ -3005,7 +3767,7 @@ p.to_timestamp(how='end')                   # at end
 | Duration arithmetic | Yes | Yes |
 | Timezone awareness | Yes | No |
 
-## 26.5 DatetimeIndex, PeriodIndex, TimedeltaIndex
+## 27.5 DatetimeIndex, PeriodIndex, TimedeltaIndex
 
 ```python
 dti = pd.DatetimeIndex(['2024-01-01', '2024-02-01', '2024-03-01'])
@@ -3022,11 +3784,11 @@ dti.inferred_freq                # detect frequency
 
 ---
 
-# 27. Date Ranges, Resampling, Shifting, Windows
+# 28. Date Ranges, Resampling, Shifting, Windows
 
 ---
 
-## 27.1 Generating Date Ranges
+## 28.1 Generating Date Ranges
 
 ```python
 pd.date_range('2024-01-01', '2024-12-31', freq='D')
@@ -3038,7 +3800,7 @@ pd.period_range('2024-01', '2024-12', freq='M')
 pd.timedelta_range(start='0s', end='1h', freq='5min')
 ```
 
-## 27.2 Pandas 2.x Frequency Aliases
+## 28.2 Pandas 2.x Frequency Aliases
 
 Pandas 2.2 renamed many "month/quarter/year end" aliases for clarity (e.g. `M` → `ME`). The old aliases still work but emit `FutureWarning`.
 
@@ -3070,7 +3832,7 @@ pd.date_range('2024-01-01', periods=4, freq='W-FRI')
 # ['2024-01-05', '2024-01-12', '2024-01-19', '2024-01-26']
 ```
 
-## 27.3 Resampling
+## 28.3 Resampling
 
 `resample` is `groupby` for time. It changes the frequency of a time-indexed Series or DataFrame.
 
@@ -3102,7 +3864,7 @@ monthly.resample('D').interpolate(method='linear')
 monthly.resample('D').asfreq()             # NaN where no data (no fill)
 ```
 
-## 27.4 Resample Anchoring and origin
+## 28.4 Resample Anchoring and origin
 
 By default, resampling buckets are anchored to "natural" boundaries (midnight for `D`, Sunday for `W`). The `origin` parameter overrides this:
 
@@ -3123,7 +3885,7 @@ ts.resample('15min', closed='right', label='right').mean()
 | `'right'` | Each bucket is labeled by its right edge |
 | `'left'` (default for most freqs) | Labeled by left edge |
 
-## 27.5 Shifting and Differencing
+## 28.5 Shifting and Differencing
 
 ```python
 s = pd.Series([100, 110, 105, 120, 130])
@@ -3137,7 +3899,7 @@ s.pct_change(1)       # [NaN, 0.1, -0.045..., 0.143, 0.083]
 s.pct_change(periods=4, fill_method=None)
 ```
 
-## 27.6 Group-Wise Resampling
+## 28.6 Group-Wise Resampling
 
 ```python
 df.set_index('ts').groupby('symbol').resample('h')['price'].mean()
@@ -3149,7 +3911,7 @@ df.groupby([
 ])['price'].mean()
 ```
 
-## 27.7 Time-Aware Rolling Windows
+## 28.7 Time-Aware Rolling Windows
 
 If your index is a `DatetimeIndex`, you can pass an offset string as the window:
 
@@ -3160,7 +3922,7 @@ df.set_index('ts')['price'].rolling('1h', closed='left').sum()
 
 The window slides by row, but its **size in time** is fixed -- so irregular timestamps are handled correctly without resampling.
 
-## 27.8 asfreq vs resample
+## 28.8 asfreq vs resample
 
 `asfreq` simply re-indexes onto a new frequency without aggregation -- the inverse of "no aggregation needed":
 
@@ -3174,11 +3936,11 @@ Use `asfreq` when you only want to align an existing series to a regular grid; u
 
 ---
 
-# 28. Timezones, Business Days, Calendars
+# 29. Timezones, Business Days, Calendars
 
 ---
 
-## 28.1 Naive vs Aware
+## 29.1 Naive vs Aware
 
 A "naive" timestamp has no timezone (`tz is None`); an "aware" timestamp carries one. Mixing naive and aware in arithmetic raises `TypeError`. The convention is: **store everything as UTC**, convert only for display.
 
@@ -3189,7 +3951,7 @@ aware = pd.Timestamp('2024-06-15 12:00', tz='UTC')
 naive - aware    # TypeError: cannot subtract tz-naive and tz-aware
 ```
 
-## 28.2 tz_localize and tz_convert
+## 29.2 tz_localize and tz_convert
 
 | Method | Purpose | Precondition |
 |---|---|---|
@@ -3210,7 +3972,7 @@ df['ts'] = df['ts'].dt.tz_localize('UTC')
 df['ts_local'] = df['ts'].dt.tz_convert('Europe/Berlin')
 ```
 
-## 28.3 Daylight Saving Errors
+## 29.3 Daylight Saving Errors
 
 DST transitions create two error modes that you must handle explicitly:
 
@@ -3233,7 +3995,7 @@ pd.Timestamp('2024-03-10 02:30').tz_localize('US/Eastern',
 # → 2024-03-10 03:00-04:00
 ```
 
-## 28.4 Common Timezone Names
+## 29.4 Common Timezone Names
 
 | Region | Names |
 |---|---|
@@ -3245,7 +4007,7 @@ pd.Timestamp('2024-03-10 02:30').tz_localize('US/Eastern',
 
 Pandas uses the `zoneinfo` module (Python 3.9+) by default; older versions use `pytz`. Either way, the IANA tz database names are accepted.
 
-## 28.5 Business Days and Custom Calendars
+## 29.5 Business Days and Custom Calendars
 
 ```python
 from pandas.tseries.offsets import BDay, BMonthEnd, BusinessHour, CustomBusinessDay
@@ -3261,7 +4023,7 @@ cbd = CustomBusinessDay(calendar=USFederalHolidayCalendar())
 pd.date_range('2024-06-01', '2024-07-31', freq=cbd)   # business days excl. US holidays
 ```
 
-## 28.6 Holidays and Custom Calendars
+## 29.6 Holidays and Custom Calendars
 
 ```python
 from pandas.tseries.holiday import (
@@ -3283,7 +4045,7 @@ cbd = CustomBusinessDay(calendar=cal)
 pd.date_range('2024-06-01', '2024-12-31', freq=cbd)
 ```
 
-## 28.7 DateOffset vs Timedelta
+## 29.7 DateOffset vs Timedelta
 
 | Aspect | `Timedelta` | `DateOffset` |
 |---|---|---|
@@ -3301,7 +4063,7 @@ ts + pd.tseries.offsets.MonthEnd()        # 2024-01-31 (already month end)
 ts + pd.tseries.offsets.MonthEnd(1)       # 2024-02-29
 ```
 
-## 28.8 Common Pitfalls
+## 29.8 Common Pitfalls
 
 ```python
 # 1. Mixing tz-naive with tz-aware silently breaks merges and comparisons
@@ -3328,11 +4090,11 @@ pd.date_range('2024', periods=4, freq='ME')          # OK
 
 ---
 
-# 29. I/O Formats
+# 30. I/O Formats
 
 ---
 
-## 29.1 Format Comparison
+## 30.1 Format Comparison
 
 | Format | Read | Write | Speed | Compression | Schema | Best For |
 |---|---|---|---|---|---|---|
@@ -3351,7 +4113,7 @@ pd.date_range('2024', periods=4, freq='ME')          # OK
 
 > Default recommendation: **Parquet** for analytics workflows, **CSV** only for exchange.
 
-## 29.2 CSV
+## 30.2 CSV
 
 ```python
 df = pd.read_csv('data.csv')
@@ -3389,7 +4151,7 @@ df.to_csv('out.csv',
 )
 ```
 
-## 29.3 Parquet
+## 30.3 Parquet
 
 ```python
 df.to_parquet('data.parquet',
@@ -3418,7 +4180,7 @@ df = pd.read_parquet('s3://bucket/sales/year=2024/')
 | Predicate pushdown | `filters=` skips entire row groups |
 | Partitioning | Hive-style directory layout for big-data tools |
 
-## 29.4 Feather (Arrow IPC)
+## 30.4 Feather (Arrow IPC)
 
 ```python
 df.to_feather('cache.feather', compression='zstd')
@@ -3427,7 +4189,7 @@ df = pd.read_feather('cache.feather', columns=['a', 'b'])
 
 Optimized for **fast read/write** between Python and R, and as a short-term local cache. Slightly less ecosystem support than Parquet for archival use.
 
-## 29.5 Excel
+## 30.5 Excel
 
 ```python
 df = pd.read_excel('book.xlsx',
@@ -3459,7 +4221,7 @@ with pd.ExcelWriter('out.xlsx', mode='a', engine='openpyxl', if_sheet_exists='re
 | `xlsxwriter` | Medium | No | Yes | Best formatting / charts on write |
 | `xlrd` | Legacy | `.xls` only | No | Old binary format |
 
-## 29.6 JSON and json_normalize
+## 30.6 JSON and json_normalize
 
 ```python
 df = pd.read_json('data.json', orient='records', lines=True)   # NDJSON
@@ -3491,7 +4253,7 @@ pd.json_normalize(data, record_path='tags', meta=['id', ['addr', 'city']])
 # 2    js   2        LA
 ```
 
-## 29.7 SQL
+## 30.7 SQL
 
 ```python
 import sqlalchemy as sa
@@ -3518,7 +4280,7 @@ df.to_sql('users', engine,
 
 For very large writes, prefer database-native bulk loaders (`COPY` for Postgres) over `to_sql`.
 
-## 29.8 HDF5
+## 30.8 HDF5
 
 ```python
 df.to_hdf('store.h5', key='df', mode='w', format='table', complevel=9, complib='blosc')
@@ -3538,7 +4300,7 @@ with pd.HDFStore('store.h5') as store:
 | `'fixed'` | Fastest write | No (read-all only) |
 | `'table'` | Slower | **Yes** -- `where=` filters at read time |
 
-## 29.9 Reading Large Files in Chunks
+## 30.9 Reading Large Files in Chunks
 
 ```python
 parts = []
@@ -3553,9 +4315,16 @@ def load_filtered(path, predicate, chunksize=100_000):
         (chunk.loc[predicate(chunk)] for chunk in pd.read_csv(path, chunksize=chunksize)),
         ignore_index=True,
     )
+
+# Pull-based reading: iterator=True returns a TextFileReader you can pull from on demand
+with pd.read_csv('big.csv', iterator=True) as reader:   # context manager closes the file
+    head = reader.get_chunk(5_000)                       # first 5,000 rows
+    nxt  = reader.get_chunk(5_000)                       # next 5,000 rows
 ```
 
-## 29.10 Pickle (Caveats)
+Avoid `result = pd.concat([result, chunk])` inside the loop: it re-copies everything accumulated so far, which is O(n²). Collect the parts in a list and `concat` once.
+
+## 30.10 Pickle (Caveats)
 
 ```python
 df.to_pickle('cache.pkl', compression='zstd')
@@ -3568,11 +4337,11 @@ df = pd.read_pickle('cache.pkl')
 
 ---
 
-# 30. Plotting and Styling
+# 31. Plotting and Styling
 
 ---
 
-## 30.1 The .plot Accessor
+## 31.1 The .plot Accessor
 
 `Series.plot` and `DataFrame.plot` wrap Matplotlib (default) and can also dispatch to alternative backends. Every chart kind is a method on `.plot`.
 
@@ -3603,7 +4372,7 @@ df['col'].plot.density()
 | `'area'` | Stacked time series totals |
 | `'pie'` | Whole-of-100% (use sparingly) |
 
-## 30.2 Customization Without Leaving Pandas
+## 31.2 Customization Without Leaving Pandas
 
 ```python
 ax = df.plot(x='ts', y=['a', 'b', 'c'],
@@ -3621,7 +4390,7 @@ ax.set_ylim(0, 100)
 plt.tight_layout()
 ```
 
-## 30.3 Subplots
+## 31.3 Subplots
 
 ```python
 df.plot(subplots=True, figsize=(8, 10), sharex=True)              # one subplot per column
@@ -3629,7 +4398,7 @@ df.plot(subplots=True, figsize=(8, 10), sharex=True)              # one subplot 
 axes = df.plot(subplots=[('a', 'b'), 'c'], figsize=(10, 8))       # group 'a' & 'b' together
 ```
 
-## 30.4 Other Plotting Helpers
+## 31.4 Other Plotting Helpers
 
 ```python
 from pandas.plotting import scatter_matrix, parallel_coordinates, andrews_curves
@@ -3641,7 +4410,7 @@ pd.plotting.autocorrelation_plot(s)
 pd.plotting.lag_plot(s)
 ```
 
-## 30.5 Switching Plotting Backend
+## 31.5 Switching Plotting Backend
 
 ```python
 pd.set_option('plotting.backend', 'plotly')         # requires plotly
@@ -3652,7 +4421,7 @@ pd.set_option('plotting.backend', 'matplotlib')     # back to default
 
 Other supported backends include `pandas-bokeh`, `hvplot.pandas`, and `plotly`.
 
-## 30.6 The Styler API (`df.style`)
+## 31.6 The Styler API (`df.style`)
 
 `df.style` returns a `Styler` for **rich display** (HTML / Excel / LaTeX), with conditional formatting, gradient backgrounds, and column-wise number formatting. The data itself is not modified.
 
@@ -3700,11 +4469,11 @@ df.style.apply(color_negative_red, subset=['delta'])
 
 ---
 
-# 31. Performance
+# 32. Performance
 
 ---
 
-## 31.1 Vectorize, Don't Iterate
+## 32.1 Vectorize, Don't Iterate
 
 The single biggest performance lever in Pandas: never write a Python `for` loop over rows when a vectorized expression exists.
 
@@ -3724,7 +4493,7 @@ df['total'] = df['price'] * df['qty']
 | `df.apply(axis=0)` (per column) | ~50x | One call per column, vectorized inside |
 | Pure vectorized arithmetic | ~100-500x | C-level loop, no Python |
 
-## 31.2 eval and query for Large Frames
+## 32.2 eval and query for Large Frames
 
 For DataFrames over a million rows, `eval` and `query` use `numexpr` to multi-thread expressions and avoid temporary arrays:
 
@@ -3735,7 +4504,7 @@ df.query('a > 10 and b < 50 and c.notnull()')
 
 Crossover point: `eval`/`query` are slower than direct expressions for small frames (~10K rows) but pull ahead beyond ~100K rows.
 
-## 31.3 Built-in Methods Beat apply
+## 32.3 Built-in Methods Beat apply
 
 Pandas / NumPy ship **Cython-optimized** kernels for many common functions. If a built-in method exists, use it instead of `apply`:
 
@@ -3748,7 +4517,7 @@ Pandas / NumPy ship **Cython-optimized** kernels for many common functions. If a
 | `df.groupby('k').apply(lambda g: g['x'].mean())` | `df.groupby('k')['x'].mean()` |
 | `s.apply(lambda x: x in {'a','b'})` | `s.isin(['a','b'])` |
 
-## 31.4 Cython-Optimized GroupBy Operations
+## 32.4 Cython-Optimized GroupBy Operations
 
 These groupby methods run in compiled Cython and are dramatically faster than `apply`:
 
@@ -3760,7 +4529,7 @@ shift, diff, pct_change, fillna, bfill, ffill, head, tail
 
 Whenever a problem can be expressed as one of these, prefer it over `g.apply(...)`.
 
-## 31.5 The Numba Engine
+## 32.5 The Numba Engine
 
 Some methods accept `engine='numba'` to JIT-compile a custom function:
 
@@ -3776,7 +4545,7 @@ df['x'].rolling(100).apply(custom, engine='numba', raw=True)
 
 Use Numba when you need a **custom** reduction or rolling function over millions of rows.
 
-## 31.6 Iteration Patterns (When You Truly Must)
+## 32.6 Iteration Patterns (When You Truly Must)
 
 ```python
 # iterrows -- slowest; returns (index, Series) tuples
@@ -3799,7 +4568,7 @@ for a, b in arr:
 
 `itertuples(index=False, name=None)` is fastest among the named iterators. But as a rule, treat any explicit iteration as a code smell and rewrite vectorized.
 
-## 31.7 Method Chaining and Lazy Construction
+## 32.7 Method Chaining and Lazy Construction
 
 Chaining helps performance by letting Pandas avoid intermediate copies, and CoW makes this even more efficient:
 
@@ -3817,7 +4586,7 @@ result = (
 )
 ```
 
-## 31.8 inplace -- Don't
+## 32.8 inplace -- Don't
 
 `inplace=True` does **not** save memory in most cases (Pandas often makes the change in a copy and reassigns internally) and breaks method chaining. It is being deprecated for many operations:
 
@@ -3833,7 +4602,7 @@ df = df.fillna(0)
 df = df.sort_values('a')
 ```
 
-## 31.9 Benchmarking Pattern
+## 32.9 Benchmarking Pattern
 
 ```python
 import time
@@ -3853,13 +4622,15 @@ bench('eval',       lambda: df.eval('a + b'))
 
 For deeper profiling: `%timeit` (IPython), `cProfile`, `line_profiler`, `py-spy`.
 
----
-
-# 32. Memory Optimization
+> See also: [NumPy vectorized vs Python loops](Python_Libraries.md#55-performance-vectorized-vs-python-loops) · [Numba](Python_Libraries.md#123-numba) · [Threads, the GIL, and BLAS (oversubscription)](Python_Libraries.md#127-threads-the-gil-and-blas) · [Python profiling tools](Python_Fundamentals.md#23-performance--optimization) · [timeit micro-benchmark pitfalls](Python_Fundamentals.md#239-timeit-and-micro-benchmark-pitfalls)
 
 ---
 
-## 32.1 Profiling Memory
+# 33. Memory Optimization
+
+---
+
+## 33.1 Profiling Memory
 
 ```python
 df.info(memory_usage='deep')          # 'deep' follows object pointers
@@ -3869,7 +4640,7 @@ df.memory_usage(deep=True).sum()       # total
 
 The `'deep'` flag is critical for `object` columns -- without it, you only see the size of the pointer array, not the actual strings.
 
-## 32.2 Six Levers, in Order
+## 33.2 Six Levers, in Order
 
 | # | Lever | Typical Win |
 |---|---|---|
@@ -3880,7 +4651,7 @@ The `'deep'` flag is critical for `object` columns -- without it, you only see t
 | 5 | Use Parquet (`dtype_backend='pyarrow'`) on read | 5-10x |
 | 6 | Use `SparseDtype` for very sparse columns | 10-100x |
 
-## 32.3 Downcasting Numerics
+## 33.3 Downcasting Numerics
 
 ```python
 df['count'] = pd.to_numeric(df['count'], downcast='integer')   # int64 → int8 if fits
@@ -3890,7 +4661,7 @@ df['ratio'] = pd.to_numeric(df['ratio'], downcast='float')      # float64 → fl
 df['user_id'] = df['user_id'].astype('uint32')
 ```
 
-## 32.4 Categoricals for Strings
+## 33.4 Categoricals for Strings
 
 ```python
 df['status'] = df['status'].astype('category')
@@ -3904,7 +4675,7 @@ print(f'{before / 2**20:.1f} MB → {after / 2**20:.1f} MB')
 
 Best when distinct value count is much smaller than row count (rule of thumb: < 1% unique).
 
-## 32.5 PyArrow Backend on Read
+## 33.5 PyArrow Backend on Read
 
 ```python
 df = pd.read_csv('big.csv', dtype_backend='pyarrow')
@@ -3918,7 +4689,7 @@ df.dtypes
 
 PyArrow strings are **always** smaller than `object` strings; numeric Arrow columns are similar to NumPy but with first-class NA support. For wide string-heavy frames the savings are routinely 5-10x.
 
-## 32.6 SparseDtype
+## 33.6 SparseDtype
 
 For columns with a dominant fill value (e.g. one-hot encoded vectors), `SparseDtype` stores only the non-fill values:
 
@@ -3936,7 +4707,7 @@ sparse.memory_usage()   # ~120,128 bytes (about 666x less)
 
 Operations on sparse arrays are slower per-row but vastly cheaper to store and stream.
 
-## 32.7 Chunked Reading
+## 33.7 Chunked Reading
 
 When the file simply does not fit in memory:
 
@@ -3948,7 +4719,7 @@ for chunk in pd.read_csv('big.csv', chunksize=500_000, usecols=['user_id', 'amou
 
 For SQL: `pd.read_sql(..., chunksize=N)`. For Parquet: read by partition or use Polars / DuckDB.
 
-## 32.8 The convert_dtypes One-Shot
+## 33.8 The convert_dtypes One-Shot
 
 A pragmatic first step on a legacy frame:
 
@@ -3965,11 +4736,11 @@ This single call typically converts `object` → `string[pyarrow]`, `int64` with
 
 ---
 
-# 33. Pandas Internals and Testing
+# 34. Pandas Internals and Testing
 
 ---
 
-## 33.1 The BlockManager Model (Legacy)
+## 34.1 The BlockManager Model (Legacy)
 
 Historically, a Pandas DataFrame stored its data in a `BlockManager` -- a collection of **Blocks**, each containing a 2-D NumPy array of one dtype. Columns of the same dtype lived together in one block; mixed-dtype frames had multiple blocks.
 
@@ -3994,7 +4765,7 @@ Implications of this layout:
 | Inserting a row | Expensive (rewrites all blocks) |
 | `df.values` on mixed-dtype | Forces upcast to `object` (slow + memory) |
 
-## 33.2 Toward Arrow-Native Storage
+## 34.2 Toward Arrow-Native Storage
 
 Pandas 2.x is steadily migrating toward **per-column** storage (one buffer per column) backed by either NumPy or PyArrow `ExtensionArray`. With `dtype_backend='pyarrow'` you get this layout today. Benefits:
 
@@ -4007,7 +4778,7 @@ Pandas 2.x is steadily migrating toward **per-column** storage (one buffer per c
 
 Code that depends on `df.values` returning a single 2-D array for mixed-dtype frames is fragile. Use `df.to_numpy(dtype='object')` if you really need that, or operate column-by-column instead.
 
-## 33.3 The Index Hash Table
+## 34.3 The Index Hash Table
 
 Every `Index` lazily builds a hash table on first lookup, giving O(1) expected `loc` access. This is why the **first** `df.loc[label]` on a fresh frame can be slower than subsequent ones -- the hash table is being constructed.
 
@@ -4025,7 +4796,7 @@ For very high-frequency single-row lookups, consider:
 - Switching to a dict for pure lookup workloads.
 - Pre-building the index hash by accessing one element after construction.
 
-## 33.4 Why Some Operations Are Slow
+## 34.4 Why Some Operations Are Slow
 
 | Slow Operation | Underlying Cause | Faster Alternative |
 |---|---|---|
@@ -4036,7 +4807,7 @@ For very high-frequency single-row lookups, consider:
 | `df.groupby('cat_col').apply(...)` | Per-group Python call | `agg`/`transform` with built-ins |
 | Repeated `loc` assignment | Each call allocates and copies | Precompute mask, assign once |
 
-## 33.5 Testing with pd.testing
+## 34.5 Testing with pd.testing
 
 The `pandas.testing` namespace provides assertion helpers that handle dtype, NA, and ordering subtleties correctly. Use these in tests instead of plain `==`.
 
@@ -4073,7 +4844,7 @@ Useful flags in practice:
 - `check_like=True` when the row/column order doesn't matter.
 - `check_exact=False` with `rtol`/`atol` for floating point.
 
-## 33.6 Property-Based Testing with hypothesis
+## 34.6 Property-Based Testing with hypothesis
 
 `hypothesis` ships a `pandas` extra (`hypothesis[pandas]`) that generates DataFrames, Series, and indexes:
 
@@ -4092,7 +4863,7 @@ def test_my_pipeline(df):
 
 This catches edge cases (empty frames, NaN columns, MultiIndexes) that hand-written tests miss.
 
-## 33.7 Key Pandas Exceptions
+## 34.7 Key Pandas Exceptions
 
 | Exception | Raised When |
 |---|---|
@@ -4113,11 +4884,11 @@ This catches edge cases (empty frames, NaN columns, MultiIndexes) that hand-writ
 
 ---
 
-# 34. Ecosystem and When to Switch
+# 35. Ecosystem and When to Switch
 
 ---
 
-## 34.1 The Pandas Ecosystem Today
+## 35.1 The Pandas Ecosystem Today
 
 | Library | Niche | Strengths | Weaknesses vs Pandas |
 |---|---|---|---|
@@ -4131,14 +4902,14 @@ This catches edge cases (empty frames, NaN columns, MultiIndexes) that hand-writ
 | **Vaex** | Out-of-core, lazy | Memory-mapped, billions of rows | Less active; smaller ecosystem |
 | **PySpark** | Distributed compute | JVM cluster scale | High overhead, JVM dependency |
 
-## 34.2 When to Stay in Pandas
+## 35.2 When to Stay in Pandas
 
 - Datasets that fit comfortably in RAM (rule of thumb: ≤ 5x available memory after compression).
 - Heterogeneous data wrangling with lots of `apply`-style logic that has no vectorized form.
 - Need for the **broadest** ecosystem (matplotlib, seaborn, scikit-learn, statsmodels, ...).
 - Quick exploration in notebooks where ergonomics matter more than throughput.
 
-## 34.3 When to Try Polars
+## 35.3 When to Try Polars
 
 - Datasets larger than a few GB but still single-node.
 - Pipelines dominated by `groupby`, `join`, `filter`, `sort` -- where Polars routinely runs 10-30x faster.
@@ -4160,7 +4931,7 @@ import polars as pl
 
 `pl.from_pandas(df)` and `df.to_pandas()` make round-tripping cheap.
 
-## 34.4 When to Use DuckDB Alongside Pandas
+## 35.4 When to Use DuckDB Alongside Pandas
 
 DuckDB runs SQL **directly against Pandas DataFrames and Parquet files**, often beating native Pandas on joins and aggregations -- without leaving the Python process:
 
@@ -4182,7 +4953,7 @@ Particularly powerful when:
 - You need fast joins on multi-million-row tables.
 - You want to query Parquet without loading it fully.
 
-## 34.5 When to Reach for Dask / Modin
+## 35.5 When to Reach for Dask / Modin
 
 - Data is genuinely too large for RAM, OR you need to scale across CPU cores / machines.
 - Existing Pandas code you'd rather not rewrite.
@@ -4194,7 +4965,7 @@ ddf = dd.read_parquet('s3://bucket/year=*/')
 ddf.groupby('region').revenue.mean().compute()
 ```
 
-## 34.6 When to Use cuDF
+## 35.6 When to Use cuDF
 
 - You have an NVIDIA GPU and a workload dominated by `groupby` / `join` over numeric columns.
 - Acceptable to constrain to the cuDF subset of the Pandas API.
@@ -4205,7 +4976,7 @@ gdf = cudf.read_parquet('big.parquet')
 gdf.groupby('region').revenue.sum().to_pandas()
 ```
 
-## 34.7 Decision Cheat-Sheet
+## 35.7 Decision Cheat-Sheet
 
 | Constraint | First Choice | Fallback |
 |---|---|---|
@@ -4216,13 +4987,15 @@ gdf.groupby('region').revenue.sum().to_pandas()
 | Distributed across cluster | Dask / PySpark | Ray + Modin |
 | GPU available, numeric workload | cuDF | Pandas + numba |
 
----
-
-# 35. Idioms and Method Chaining Recipes
+> See also: [GPU array ecosystem and zero-copy interop](Python_Libraries.md#12-gpu-array-ecosystem-and-zero-copy-interop) (CuPy, Numba, `__cuda_array_interface__`) and [DLPack](Python_Libraries.md#125-dlpack-zero-copy-exchange-between-frameworks) for moving columns between pandas/Arrow, CuPy, and PyTorch without copies.
 
 ---
 
-## 35.1 The Idiomatic Pipeline
+# 36. Idioms and Method Chaining Recipes
+
+---
+
+## 36.1 The Idiomatic Pipeline
 
 Idiomatic Pandas is **chained**, **lazy in spirit**, and **avoids `inplace`**. A typical end-to-end transformation reads top-to-bottom like a recipe:
 
@@ -4251,7 +5024,7 @@ out = (
 )
 ```
 
-## 35.2 Recipe: Top-N per Group
+## 36.2 Recipe: Top-N per Group
 
 ```python
 df.sort_values(['dept', 'salary'], ascending=[True, False]) \
@@ -4262,7 +5035,7 @@ df['rank'] = df.groupby('dept')['salary'].rank(method='dense', ascending=False)
 top3 = df[df['rank'] <= 3].drop(columns='rank')
 ```
 
-## 35.3 Recipe: Z-Score Within Group
+## 36.3 Recipe: Z-Score Within Group
 
 ```python
 df['salary_z'] = (
@@ -4271,14 +5044,14 @@ df['salary_z'] = (
 )
 ```
 
-## 35.4 Recipe: Forward-Fill Within Group
+## 36.4 Recipe: Forward-Fill Within Group
 
 ```python
 df = df.sort_values(['user_id', 'ts'])
 df['last_known_status'] = df.groupby('user_id')['status'].ffill()
 ```
 
-## 35.5 Recipe: Pivot With Margins (Including a Total Row)
+## 36.5 Recipe: Pivot With Margins (Including a Total Row)
 
 ```python
 pt = pd.pivot_table(
@@ -4289,7 +5062,7 @@ pt = pd.pivot_table(
 )
 ```
 
-## 35.6 Recipe: Conditional Column with np.select
+## 36.6 Recipe: Conditional Column with np.select
 
 ```python
 import numpy as np
@@ -4303,7 +5076,7 @@ choices = ['A', 'B', 'C']
 df['grade'] = np.select(conditions, choices, default='F')
 ```
 
-## 35.7 Recipe: Replace SettingWithCopyWarning
+## 36.7 Recipe: Replace SettingWithCopyWarning
 
 ```python
 # BAD
@@ -4318,7 +5091,7 @@ sub = df[df['x'] > 0].copy()
 sub['y'] = 0
 ```
 
-## 35.8 Recipe: Joining with Validation
+## 36.8 Recipe: Joining with Validation
 
 ```python
 # Always validate when you believe the right side is unique
@@ -4333,7 +5106,7 @@ assert (out['_merge'] != 'left_only').all(), 'orders with no matching product'
 out = out.drop(columns='_merge')
 ```
 
-## 35.9 Recipe: Wide → Long → Pivot Round-Trip for Reshaping
+## 36.9 Recipe: Wide → Long → Pivot Round-Trip for Reshaping
 
 ```python
 long = df.melt(id_vars=['id'], var_name='metric', value_name='value')
@@ -4342,7 +5115,7 @@ wide = filtered.pivot(index='id', columns='metric', values='value')
 wide['margin'] = wide['sales'] - wide['cost']
 ```
 
-## 35.10 Recipe: Time-Series Resample + Group
+## 36.10 Recipe: Time-Series Resample + Group
 
 ```python
 daily_per_symbol = (
@@ -4356,7 +5129,7 @@ daily_per_symbol = (
 )
 ```
 
-## 35.11 Recipe: Fast Bulk Update with map
+## 36.11 Recipe: Fast Bulk Update with map
 
 ```python
 # Lookup table pattern
@@ -4364,7 +5137,7 @@ mapping = pd.Series({'NYC': 'East', 'LA': 'West', 'CHI': 'Central'})
 df['region'] = df['city'].map(mapping).fillna('Other')
 ```
 
-## 35.12 Recipe: Building an Append-Only Dataset Without O(n²)
+## 36.12 Recipe: Building an Append-Only Dataset Without O(n²)
 
 ```python
 parts = []
@@ -4378,11 +5151,11 @@ combined = pd.concat(parts, ignore_index=True)
 
 ---
 
-# 36. Common Pitfalls and Interview Questions
+# 37. Common Pitfalls and Interview Questions
 
 ---
 
-## 36.1 Common Pitfalls
+## 37.1 Common Pitfalls
 
 **Pitfall 1: SettingWithCopyWarning / chained assignment**
 
@@ -4492,7 +5265,9 @@ df = pd.read_csv('big.csv')                # may infer 'object' for everything
 df = pd.read_csv('big.csv', dtype={'id': 'Int64', 'name': 'string'})
 ```
 
-## 36.2 Interview Questions
+## 37.2 Interview Questions
+
+> For a one-page refresher of these pitfalls before an interview, see [Python Libraries 13.3 Key Pitfalls](Python_Libraries.md#133-key-pitfalls). NumPy-side questions (broadcasting, strides, views) are in [Python Libraries 9.2](Python_Libraries.md#92-interview-questions) and [10.9](Python_Libraries.md#109-interview-questions).
 
 **Q1. What is the difference between `loc` and `iloc`?**
 
@@ -4563,7 +5338,7 @@ Polars: large single-node workloads dominated by `groupby` / `join` / `filter` /
 
 ---
 
-*End of Pandas reference. This guide is designed as a comprehensive companion to the **Python Fundamentals**, **Python Libraries** (NumPy + PyQt sections), **DSA Fundamentals**, **LeetCode Patterns**, and **CS Fundamentals** guides.*
+*End of Pandas reference. This guide is designed as a comprehensive companion to the [**Python Fundamentals**](Python_Fundamentals.md), [**Python Libraries**](Python_Libraries.md) (NumPy + PyQt sections), [**DSA Fundamentals**](../computer-science/DSA_Fundamentals.md), [**LeetCode Patterns**](../computer-science/LeetCode_Patterns.md), and [**CS Fundamentals**](../computer-science/CS_Fundamentals.md) guides.*
 
 
 
