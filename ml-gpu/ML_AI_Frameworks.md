@@ -1,5 +1,7 @@
 # ML and AI Frameworks -- Comprehensive Reference
 
+> Last reviewed: 2026-11 · Versions assumed: PyTorch 2.8+, vLLM 0.10+, ROCm 6.4-7.x; section 8.8 checked with JAX 0.12, IREE 3.13, Apache TVM 0.27
+
 > A deep-dive reference covering PyTorch, TensorFlow, JAX, Triton, vLLM, SGLang, and Megatron-LM -- the essential frameworks for modern machine learning, GPU kernel development, and large-scale model training and inference. Each section includes conceptual explanations, comparison tables, code examples, ASCII architecture diagrams, and interview questions with detailed answers. Complements the *Parallel and GPU Programming*, *Python Libraries*, and *Python Fundamentals* guides.
 
 ---
@@ -73,6 +75,12 @@
 ### Part 8: Cross-Cutting Topics
 
 44. [Comprehensive Comparison Tables](#44-comprehensive-comparison-tables)
+45. [Training Memory Math: ZeRO, Activations, and Offload](#45-training-memory-math-zero-activations-and-offload)
+46. [Mixture of Experts and Expert Parallelism](#46-mixture-of-experts-and-expert-parallelism)
+47. [The ROCm ML Stack](#47-the-rocm-ml-stack)
+48. [Debugging a Slow Training Step](#48-debugging-a-slow-training-step)
+
+> Within Part 1, see also [8.6 torch.compile Internals](#86-torchcompile-internals-dynamo-aotautograd-inductor), [8.7 Number Formats and Mixed-Precision Numerics](#87-number-formats-and-mixed-precision-numerics), and [8.8 ML Compiler Stacks: MLIR, XLA, TVM, and IREE](#88-ml-compiler-stacks-mlir-xla-tvm-and-iree). For transformer fundamentals (attention, GQA, FLOP counting) see [LLM and ML Fundamentals](../ml-gpu/LLM_and_ML_Fundamentals.md); for interview-style system design (serving, training clusters) see [ML Systems Design](../ml-gpu/ML_Systems_Design.md).
 
 ---
 
@@ -1027,11 +1035,34 @@ FSDP shards model parameters, gradients, and optimizer states across GPUs, mater
 DDP:  Each GPU holds full model copy + full optimizer state
 FSDP: Each GPU holds 1/N of parameters + 1/N of optimizer state
 
-FSDP Memory per GPU (approximate):
-  Parameters:      P / N
-  Gradients:       P / N
-  Optimizer State: O / N    (O = 2P for Adam)
-  Peak:            ~3P / N  (vs 16P for DDP with Adam)
+Model-state memory per GPU, in BYTES, for P parameters, N GPUs,
+mixed precision + Adam (FSDP keeps the sharded params in fp32 and casts
+to bf16 for the all-gather; grads reduced in fp32):
+  Sharded fp32 params:     4P / N
+  Sharded fp32 grads:      4P / N
+  Sharded Adam m and v:    8P / N
+  Total sharded state:    16P / N bytes
+  + transient unsharded bf16 params of the FSDP unit(s) being
+    all-gathered (current + prefetched), + activations
+
+DDP with AMP + Adam keeps all of it replicated: 16P bytes per GPU.
+Example, P = 7e9, N = 8:  DDP 112 GB/GPU  vs  FSDP 14 GB/GPU (+ working set).
+```
+
+The 16 bytes/param figure is the same whether you count it as "fp32 params + fp32 grads + 8 B Adam" (PyTorch AMP/FSDP) or as "2 B bf16 weights + 2 B bf16 grads + 12 B fp32 master/m/v" (Megatron/DeepSpeed style). Section 45 works through the ZeRO-1/2/3 per-GPU formulas, activations, and offload: see [Training Memory Math](#45-training-memory-math-zero-activations-and-offload).
+
+**FSDP2 (`fully_shard`).** FSDP1 (the `FullyShardedDataParallel` wrapper below) flattens each wrapped unit's parameters into one `FlatParameter`. FSDP2 is the replacement API. It shards each parameter individually as a `DTensor` on a `DeviceMesh`, so per-parameter dtypes, freezing (LoRA), and composition with tensor parallelism are much simpler. Its memory accounting is also more deterministic. FSDP2 is public as `torch.distributed.fsdp.fully_shard` from PyTorch 2.6.
+
+```python
+# fragment -- FSDP2 on a 1-D data-parallel mesh
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+
+mesh = init_device_mesh("cuda", (8,), mesh_dim_names=("dp",))   # "cuda" is also correct on ROCm
+mp = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+for block in model.layers:            # shard each transformer block = one all-gather unit
+    fully_shard(block, mesh=mesh, mp_policy=mp)
+fully_shard(model, mesh=mesh, mp_policy=mp)   # root: embeddings, final norm, head
 ```
 
 ```python
@@ -1110,6 +1141,8 @@ model = torch.compile(model, mode='max-autotune')
 # 'max-autotune'     -- try many kernel configs (slow compile, fast run)
 ```
 
+For guards, graph breaks, recompiles, AOTAutograd, Inductor codegen, and the cases where compile hurts, see [8.6](#86-torchcompile-internals-dynamo-aotautograd-inductor).
+
 ## 8.2 Mixed Precision Training
 
 ```python
@@ -1135,7 +1168,9 @@ for x, y in loader:
 | FP32 only | Baseline | Baseline | Best |
 | FP16 + scaling | ~2x speedup | ~50% reduction | Slight loss possible |
 | BF16 | ~2x speedup | ~50% reduction | Nearly same as FP32 |
-| FP8 (H100) | ~4x speedup | ~75% reduction | Requires careful tuning |
+| FP8 (H100, MI300X and later) | ~4x speedup | ~75% reduction | Requires careful tuning |
+
+Section [8.7](#87-number-formats-and-mixed-precision-numerics) covers bit layouts (FP16/BF16/TF32/FP8/MX), FP8 scaling recipes, accumulation precision, and non-determinism.
 
 ## 8.3 CUDA Graphs
 
@@ -1204,6 +1239,733 @@ with torch.profiler.profile(
 
 print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 ```
+
+For a full method for reading these traces (record_function, Perfetto, sync points, comm overlap, rocprofv3 correlation), see [48. Debugging a Slow Training Step](#48-debugging-a-slow-training-step).
+
+## 8.6 `torch.compile` Internals: Dynamo, AOTAutograd, Inductor
+
+```text
+ Python function / nn.Module.forward
+        │  PEP 523 frame-evaluation hook
+        ▼
+ TorchDynamo ── symbolically executes CPython bytecode
+        │        - records torch ops into an FX graph
+        │        - installs GUARDS (conditions under which the graph is valid)
+        │        - on unsupported code: GRAPH BREAK (run that bit in Python,
+        │          then resume tracing in a new graph)
+        ▼
+ FX graph (Torch IR, still Python-level ops)
+        │
+        ▼
+ AOTAutograd ── traces forward AND backward ahead of time into a joint graph
+        │        - functionalization (removes in-place mutation / aliasing)
+        │        - decomposes to the core ATen op set
+        │        - min-cut partitioner: chooses what to SAVE vs RECOMPUTE for backward
+        ▼
+ forward graph + backward graph (ATen IR)
+        │
+        ▼
+ TorchInductor ── lowers to loop-level IR, schedules and FUSES
+        │          pointwise/reduction ops, plans buffers
+        │          - GPU: generates Triton kernels (CUDA and ROCm alike)
+        │          - CPU: C++/OpenMP
+        │          - GEMM/conv: "extern" calls to vendor BLAS (cuBLAS / hipBLASLt)
+        │            unless max-autotune finds a faster Triton template
+        ▼
+ Compiled callable, cached per (code object, guard set)
+```
+
+### Guards and recompilation
+
+Each compiled frame keeps a cache of `(guards -> compiled code)` entries. Guards check everything the trace assumed: tensor dtype, device, rank, sizes and strides (unless the dimension is dynamic), `requires_grad`, the values of Python scalars and constants, `nn.Module` identity and attributes, global flags, and grad mode. On every call the guards are evaluated. If no entry matches, Dynamo **recompiles**. After `torch._dynamo.config.recompile_limit` entries (default 8; the older name is `cache_size_limit`), that frame falls back to eager with a warning, and the speedup silently disappears.
+
+**Dynamic shapes.** The first compile specializes on concrete sizes. When a size changes, the default `dynamic=None` ("automatic dynamic") recompiles once with that dimension as a symbolic `SymInt`. Later sizes reuse the dynamic graph. Sizes 0 and 1 are always specialized. For dimensions you know will vary (batch, sequence length), use `torch._dynamo.mark_dynamic(x, dim)` before the first call to skip the wasted static compile.
+
+```python
+# compile_demo.py -- run: TORCH_LOGS="graph_breaks,recompiles" python compile_demo.py
+import torch
+import torch._dynamo as dynamo
+
+def f(x, scale):
+    y = torch.sin(x) * scale
+    if y.sum() > 0:           # data-dependent branch -> graph break
+        y = y + 1
+    print("side effect")      # print() -> graph break (Python side effect)
+    return torch.relu(y)
+
+# 1) Count graphs and graph breaks
+explanation = dynamo.explain(f)(torch.ones(8), 2.0)   # sum > 0: branch taken
+print(f"graphs={explanation.graph_count} breaks={explanation.graph_break_count}")
+for reason in explanation.break_reasons:
+    print("  break:", reason.reason.splitlines()[0])
+
+# 2) Recompilation: guards on the Python float `s` and on shapes
+g = torch.compile(lambda x, s: torch.sin(x) * s)
+g(torch.randn(8), 2.0)
+g(torch.randn(8), 3.0)     # guard "s == 2.0" fails -> recompile
+g(torch.randn(16), 3.0)    # size guard fails -> recompile with dim 0 dynamic
+g(torch.randn(32), 3.0)    # reuses the dynamic-shape graph: no recompile
+print("done")
+```
+
+On recent PyTorch (checked on 2.15) this prints `graphs=3 breaks=2`. The count depends on which branch the data takes, which is why the input is fixed. The `recompiles` log names the failing guard each time (`s == 2.0`, then `tensor 'x' size mismatch at index 0. expected 8, actual 16`). The fix for the scalar case is to pass `s` as a 0-d tensor (or let Dynamo treat it as dynamic) rather than a Python float that keeps changing, for example a learning rate or a step counter.
+
+### Diagnostics toolbox
+
+| Tool | What it shows |
+|---|---|
+| `TORCH_LOGS="graph_breaks"` | Every graph break, with reason and user stack |
+| `TORCH_LOGS="recompiles"` (or `recompiles_verbose`) | Which guard failed and caused each recompile |
+| `TORCH_LOGS="guards"` | The full guard set of each compiled graph |
+| `TORCH_LOGS="output_code"` | The generated Triton/C++ source |
+| `TORCH_LOGS="aot_graphs"`, `"post_grad_graphs"` | Forward/backward graphs after AOTAutograd / Inductor passes |
+| `TORCH_LOGS="perf_hints"` | Missed optimizations, e.g. CUDA graphs skipped and why |
+| `TORCH_LOGS="+dynamo"` | Verbose Dynamo tracing (the `+` sets DEBUG level) |
+| `torch._dynamo.explain(fn)(*args)` | Graph count, break count, and reasons, without a profiler |
+| `TORCH_TRACE=/tmp/tr` then `tlparse /tmp/tr/*` | HTML report of every compile, break, and guard (tlparse is a separate pip package) |
+| `torch.compile(..., fullgraph=True)` | Raise an error on any graph break (use in CI) |
+| `torch.compiler.set_stance("fail_on_recompile")` | Raise an error instead of silently recompiling in steady state |
+| `TORCHINDUCTOR_MAX_AUTOTUNE=1`, `TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS=TRITON,ATEN` | Control Inductor autotuning (also listed in AMD's MI300X tuning guide) |
+
+### What fusion buys: a memory-traffic calculation
+
+`y = gelu(x * w + b)` on N = 64M bf16 elements (`w` and `b` are broadcast vectors, so their traffic is negligible):
+
+```text
+Eager: 3 kernels, each reads 2N bytes and writes 2N bytes  -> 12N = 768 MB
+Fused: 1 kernel, reads x once and writes y once              ->  4N = 256 MB
+At ~5.3 TB/s HBM (MI300X peak): 145 us vs 48 us, plus 2 fewer kernel launches.
+```
+
+Pointwise and reduction chains are memory-bound (see [Roofline](../computer-science/Performance_Engineering.md#3-roofline-model)), so cutting the bytes moved is the speedup. AOTAutograd's partitioner adds a second, less obvious win: it can choose to **recompute** cheap pointwise ops in backward instead of saving their outputs, which lowers activation memory without any code change.
+
+### CUDA/HIP graphs mode (`mode="reduce-overhead"`)
+
+`reduce-overhead` records each compiled graph into a CUDA graph ("cudagraph trees"). On ROCm, `torch.cuda.CUDAGraph` is backed by HIP graphs, so the same mode works. A whole step's kernels then replay with one launch, which removes the per-op CPU dispatch and launch cost (a few µs to roughly 20 µs per op in eager PyTorch). That matters most for small batches and decode.
+
+- **Requirements:** static shapes (one graph is recorded per distinct shape), no CPU-GPU sync inside the region, and no CPU tensors or data-dependent control flow. Inductor skips cudagraphs and says why under `TORCH_LOGS=perf_hints`.
+- **Memory cost:** graphs own a private memory pool, and inputs are copied into static buffers. Peak memory rises.
+- **Pitfall:** outputs live in the graph's pool and are overwritten by the next replay. Clone outputs you keep across iterations, or call `torch.compiler.cudagraph_mark_step_begin()` at each step boundary when the step structure is unusual.
+
+### When `torch.compile` hurts
+
+| Situation | Why | Mitigation |
+|---|---|---|
+| Short jobs, notebooks, many model variants | Compile takes seconds to minutes per graph and shape | Inductor/AOTAutograd caches (on by default; `TORCHINDUCTOR_CACHE_DIR`), regional compile (compile the repeated block, not the whole model) |
+| Recompilation storms | Changing Python scalars, new shapes, mutated module attributes | `TORCH_LOGS=recompiles`, `mark_dynamic`, pass scalars as tensors |
+| Many graph breaks | Small graphs lose fusion and pay per-graph guard and launch overhead | `fullgraph=True` to find them; `torch.cond`, branchless `torch.where`, custom ops |
+| GEMM-dominated, already GPU-bound | GEMMs still go to vendor BLAS; there is little left to fuse | Measure first; try `max-autotune` only for GEMM-heavy inference |
+| `reduce-overhead` with varying shapes | One graph per shape, so memory and capture time multiply | Pad or bucket shapes, or use `default` mode |
+| Bit-exact comparisons against eager | Fusion keeps intermediates in fp32 registers and changes reduction order | Compare with tolerances (see 8.7) |
+
+### Interview Questions
+
+**Q1.** Your compiled training loop got slower after a refactor. `TORCH_LOGS=recompiles` shows dozens of recompiles of `forward`. What are the likely causes and fixes?
+
+**A.** Each recompile means some guard failed. Common causes: (1) A Python scalar whose value changes every step (step counter, dropout probability, scheduler LR) is passed into the compiled region. Dynamo specializes on its value, so every new value is a new graph. Pass it as a tensor, or hoist it out of the compiled region. (2) Varying shapes, such as sequence length. After the first change Dynamo marks the dim dynamic, but sizes 0/1 or changes in other dims keep recompiling. Use `mark_dynamic`, or pad or bucket to a few lengths. (3) Module attributes mutated in `forward` (`self.counter += 1`) or switching between `train()` and `eval()`. (4) Hitting `recompile_limit` (8). After that the frame silently runs eagerly, which explains the slowdown. Confirm with `torch.compiler.set_stance("fail_on_recompile")` in a test.
+
+**Q2.** What does AOTAutograd do that Dynamo alone doesn't?
+
+**A.** Dynamo only sees the forward Python code. AOTAutograd traces the backward pass at compile time by running autograd on the captured forward with fake tensors. This produces a joint forward+backward graph. It then functionalizes the graph (no in-place mutation, so the compiler can reorder freely) and decomposes ops to a smaller core ATen set. A min-cut partitioner then splits the joint graph into forward and backward graphs and decides which intermediates to save and which to recompute. The backward pass becomes compilable and fusible too, and activation memory often drops because cheap pointwise results are recomputed instead of stored.
+
+**Q3.** How does `torch.compile` work on AMD GPUs? What differs?
+
+**A.** The frontend is identical, because Dynamo and AOTAutograd are device-agnostic. Inductor emits the same Triton source, and Triton's AMD backend compiles it to AMDGCN instead of PTX. Differences that matter: (1) a warp is a 64-lane wavefront on CDNA, so `num_warps=4` means 256 threads; (2) the autotuning space includes AMD-specific knobs (`waves_per_eu`, `matrix_instr_nonkdim`); (3) extern GEMMs go to hipBLASLt or rocBLAS, and TunableOp can tune them; (4) `reduce-overhead` uses HIP graphs. See [47.4](#474-triton-on-amd-backend-specifics).
+
+**Q4.** When would you NOT enable `torch.compile`?
+
+**A.** When compile time exceeds the time saved: short runs, or rapidly changing shapes such as variable-resolution images without bucketing. Also when the model is GEMM-bound and you measured no gain, and when you need bit-exact parity with eager. It is also the wrong first step when the step is not GPU-compute-bound at all, for example when the dataloader or communication is the bottleneck. Profile first (section 48).
+
+---
+
+## 8.7 Number Formats and Mixed-Precision Numerics
+
+See [LLM and ML Fundamentals](../ml-gpu/LLM_and_ML_Fundamentals.md) for how these formats are used in quantized inference, and [CS Fundamentals](../computer-science/CS_Fundamentals.md) for IEEE 754 basics.
+
+| Format | Sign/Exp/Mantissa bits | Max finite | Epsilon (2^-mantissa) | Notes |
+|---|---|---|---|---|
+| FP32 | 1/8/23 | 3.4e38 | 1.2e-7 | Master weights, optimizer state, accumulators |
+| TF32 | 1/8/10 | ~3.4e38 | 9.8e-4 | A matrix-unit *math mode* for FP32 inputs, not a storage type |
+| FP16 | 1/5/10 | 65504 | 9.8e-4 | Min normal 6.1e-5, so small gradients underflow and need loss scaling |
+| BF16 | 1/8/7 | 3.39e38 | 7.8e-3 | FP32 range with coarse precision; no loss scaling needed |
+| FP8 E4M3 (OCP "E4M3FN") | 1/4/3 | 448 | 0.125 | No infinities; forward pass (weights, activations) |
+| FP8 E5M2 | 1/5/2 | 57344 | 0.25 | IEEE-like, has inf; used for gradients (needs range) |
+| FP8 E4M3FNUZ / E5M2FNUZ | 1/4/3, 1/5/2 | 240 / 57344 | same | Exponent bias +1, no negative zero, single NaN (0x80). This is the FP8 on MI300 (gfx942) |
+| FP4 E2M1 | 1/2/1 | 6 | -- | Representable magnitudes: 0, 0.5, 1, 1.5, 2, 3, 4, 6; only usable with block scales |
+| MX formats (MXFP8/6/4) | elements + shared E8M0 scale per 32-element block | -- | -- | OCP Microscaling spec; hardware block scaling on MI350-series (CDNA4) and NVIDIA Blackwell |
+
+PyTorch dtypes: `torch.float8_e4m3fn`, `torch.float8_e5m2`, `torch.float8_e4m3fnuz`, `torch.float8_e5m2fnuz`, `torch.float8_e8m0fnu` (MX scale), `torch.float4_e2m1fn_x2` (two FP4 values packed per byte).
+
+**AMD FP8 pitfall.** An OCP E4M3FN checkpoint, the format most published FP8 models use, cannot be fed bit-for-bit to MI300 FP8 instructions. Because the exponent bias differs by one, the same bit pattern means half the value in FNUZ, and 0x80 (negative zero in OCP) is NaN in FNUZ. Loaders convert by remapping 0x80 to 0, reinterpreting the bits, and doubling the scale. vLLM does this on ROCm. MI350-series GPUs support OCP FP8 natively.
+
+### FP8 scaling recipes
+
+FP8 has only about 2 significant decimal digits and a narrow range, so every FP8 tensor carries a scale. The stored value is `q = cast_fp8(x * s)`, and it dequantizes as `x ≈ q / s`.
+
+| Recipe | Scale chosen from | Trade-off |
+|---|---|---|
+| Per-tensor, dynamic ("current") | `amax(x)` of this tensor now: `s = fp8_max / amax` | Accurate, but needs an extra reduction pass over the tensor |
+| Per-tensor, delayed | Max of an amax *history* from previous steps (NVIDIA Transformer Engine) | No extra pass; overflows if activations spike |
+| Per-row / per-channel | amax per row of activations and per output channel of weights | Handles outlier channels; scales applied in the GEMM epilogue |
+| Block-wise | amax per tile, e.g. 1x128 activation tiles and 128x128 weight blocks (DeepSeek-V3) | Robust to outliers; needs a block-scaled GEMM kernel |
+| MX (microscaling) | Power-of-two E8M0 scale per 32 contiguous elements, applied in hardware | Fine granularity with little overhead; MXFP4/MXFP6 make FP4/FP6 training and inference viable |
+
+A typical FP8 training recipe: E4M3 for weights and activations in forward, E5M2 (or E4M3 with finer scaling) for gradients. Master weights, optimizer state, softmax, normalization, loss, and the residual stream stay in BF16/FP32.
+
+### Accumulation precision
+
+Matrix units (AMD MFMA, NVIDIA Tensor Cores) take low-precision inputs and accumulate in FP32. This matters because adding a small number to a large BF16 running sum loses it entirely. In BF16 the spacing between representable values in [256, 512) is 2, so `256 + 1 == 256`. Summing 1000 ones sequentially in BF16 stalls at **256**. With FP32 accumulation it returns 1000. The same effect is why **FP32 master weights** are needed: with BF16 weights, an update `lr * grad` smaller than about `|w| * 2^-9` rounds away and that parameter stops learning. (DeepSeek-V3 also found the FP8 GEMM accumulator on H100 to be narrower than full FP32, and periodically promoted partial sums to FP32.)
+
+### Non-determinism and compensated summation
+
+Floating-point addition is not associative. In fp32, `(1e8 + -1e8) + 1 = 1` but `1e8 + (-1e8 + 1) = 0`. Run-to-run differences on GPUs come from anything that changes the **order** of additions:
+
+- `atomicAdd`-based reductions (`index_add_`, `scatter_add_`, embedding backward), where arrival order varies.
+- Split-K GEMMs, and tuned kernel selection. TunableOp, Inductor autotuning, and the hipBLASLt heuristics can pick a different kernel for the same shape on a different run or GPU.
+- Collective algorithms: ring and tree all-reduce sum in different orders, and RCCL/NCCL choose between them by message size and topology.
+- Different world sizes or micro-batch splits.
+
+`torch.use_deterministic_algorithms(True)` makes PyTorch raise on known non-deterministic ops (or pick deterministic variants). It does not make results identical across different GPU models, library versions, or world sizes. Tests therefore compare with `torch.testing.assert_close` (dtype-aware rtol/atol), never `==`.
+
+Compensated (Kahan) summation carries the rounding error forward:
+
+```python
+# kahan.py -- naive vs compensated summation in float32 (requires numpy)
+import numpy as np
+
+def naive_sum(xs):
+    s = np.float32(0.0)
+    for x in xs:
+        s = np.float32(s + x)
+    return s
+
+def kahan_sum(xs):
+    s = np.float32(0.0)
+    c = np.float32(0.0)              # running compensation (lost low-order bits)
+    for x in xs:
+        y = np.float32(x - c)
+        t = np.float32(s + y)
+        c = np.float32((t - s) - y)  # what got rounded away when forming t
+        s = t
+    return s
+
+xs = np.full(1_000_000, 0.1, dtype=np.float32)
+exact = 1_000_000 * float(np.float32(0.1))   # true sum of the float32 inputs
+naive, kahan, pairwise = naive_sum(xs), kahan_sum(xs), xs.sum()
+print(f"naive   : {naive:.4f}  err={abs(naive - exact):.4f}")     # ~100958, err ~958
+print(f"kahan   : {kahan:.4f}  err={abs(kahan - exact):.4f}")     # 100000.0000, err 0
+print(f"pairwise: {pairwise:.4f}  err={abs(pairwise - exact):.4f}")  # np.sum, err ~0.008
+```
+
+GPU reductions are tree-shaped (pairwise), so their error grows like O(log n)·eps instead of O(n)·eps. That is one reason a GPU sum can be *more* accurate than a naive CPU loop, even though it is not bitwise reproducible.
+
+### Interview Questions
+
+**Q1.** Why two FP8 formats? Which goes where?
+
+**A.** With 8 bits you trade range against precision. E4M3 has 3 mantissa bits (relative step 2^-3 = 12.5%) and range up to ±448. E5M2 has 2 mantissa bits and range up to ±57344. Forward tensors (weights, activations) have a bounded, well-understood range and benefit from precision, so they use E4M3. Gradients span many orders of magnitude across layers and steps, so they need range and use E5M2. Fine-grained scaling (block-wise or MX) narrows each block's range enough that some recipes use E4M3 everywhere.
+
+**Q2.** Why does BF16 training not need a GradScaler, yet still keeps FP32 master weights?
+
+**A.** These are two different problems. GradScaler addresses *range*: FP16's minimum normal of 6e-5 makes small gradients underflow, and BF16 has FP32's 8-bit exponent, so it doesn't underflow. Master weights address *precision*. BF16 has 8 significant bits, so `w + lr*g` with `|lr*g| < |w|·2^-9` rounds back to `w`. With typical LRs (1e-5 to 1e-4) and weights around 0.01-1, many updates are rounded away or heavily quantized, and that gets worse as LR decays late in training. The optimizer therefore updates an FP32 copy and casts it to BF16 for compute, at a cost of 4 extra bytes per parameter (see section 45).
+
+**Q3.** Two identical training runs on the same 8 GPUs diverge in loss after a few thousand steps. Is that a bug?
+
+**A.** Not necessarily. Atomics, split-K kernels, autotuned kernel choice, and collective reduction order all change summation order, which produces last-bit differences, and chaotic training dynamics amplify them over thousands of steps. To decide: (1) enable `torch.use_deterministic_algorithms(True)`, fix seeds, disable autotuning and TunableOp tuning, and use a fixed kernel table; (2) check that the step-0 loss and gradient norms match to tolerance; (3) bisect the step where they first diverge beyond fp rounding. A bug shows up as an early, large divergence. Rounding noise shows up as slow divergence with statistically equal final loss.
+
+**Q4.** A customer's FP8 checkpoint produces garbage on MI300X but works on H100. What would you check first?
+
+**A.** The FP8 variant. The checkpoint is almost certainly OCP E4M3FN (max 448), and MI300 computes in E4M3FNUZ (max 240, bias +1, 0x80 = NaN). The loader must convert the weights (map 0x80 to 0 and double the scales) or dequantize. Also check that any value above 240 after rescaling is clamped, and that activation scales computed on H100 are rescaled the same way.
+
+---
+
+## 8.8 ML Compiler Stacks: MLIR, XLA, TVM, and IREE
+
+Section 8.6 covered one compiler, `torch.compile`, in depth. This section covers the other stacks that come up in ML-compiler, kernel, and accelerator interviews: MLIR (the infrastructure most new compilers are built on), XLA (JAX/TensorFlow), TVM (schedule search), and IREE (an MLIR-based compiler plus runtime that AMD contributes to heavily). It ends with fusion rules that apply to all of them.
+
+See also: [Elementwise Fusion and Kernel Launch Overhead](GPU_Kernel_Case_Studies.md#7-elementwise-fusion-and-kernel-launch-overhead) (hand-fused HIP kernels with measurements), [Tiled GEMM Progression](GPU_Kernel_Case_Studies.md#6-tiled-gemm-progression) (the schedule a compiler has to find, written by hand), [Loop Interchange and Tiling for Matmul](../computer-science/Performance_Engineering.md#54-loop-interchange-and-tiling-for-matmul), [Roofline Model](../computer-science/Performance_Engineering.md#3-roofline-model), and [Triton Compilation Pipeline](#254-compilation-pipeline).
+
+### The common shape of an ML compiler
+
+```text
+ Framework program (PyTorch, JAX, TensorFlow, ONNX)
+      │  capture: tracing (JAX, tf.function), bytecode analysis (Dynamo), export
+      ▼
+ GRAPH IR        FX/ATen, HLO/StableHLO, Relax, MLIR torch/tosa dialects
+      │  graph passes: decomposition, CSE, constant folding, layout assignment,
+      │  SPMD partitioning, and FUSION (which ops share one kernel)
+      ▼
+ TENSOR/LOOP IR  Inductor loop IR, MLIR linalg, TVM TIR
+      │  SCHEDULE: tile, reorder, vectorize, map loops to workgroups and waves,
+      │  stage operands through LDS, software-pipeline, pick an MFMA shape
+      │  <- autotuning searches over these choices
+      ▼
+ TARGET IR       LLVM IR + AMDGPU/NVPTX intrinsics, SPIR-V, Triton TTGIR
+      ▼
+ ISA + runtime   hsaco/cubin, host launch code, HIP/CUDA graphs, VM bytecode
+```
+
+Every stack makes two separate decisions:
+
+1. **Fusion** (graph level): which ops become one kernel. This decides how many bytes go to and from HBM, so it dominates for memory-bound ops.
+2. **Schedule** (kernel level): how the loop nest of one kernel maps onto the hardware. This decides how close a compute-bound kernel gets to peak FLOP/s.
+
+GEMMs and convolutions often skip step 2 entirely. The compiler emits a call to a vendor library (hipBLASLt, rocBLAS, MIOpen, cuBLAS, cuDNN), and fusion is limited to whatever epilogue the library supports.
+
+| Stack | Origin | Input | Graph IR | Kernel codegen | Tuning | Typical use |
+|---|---|---|---|---|---|---|
+| `torch.compile` / Inductor | PyTorch (Meta) | Python bytecode via Dynamo | FX graph of ATen ops | Triton (GPU), C++/OpenMP (CPU); extern GEMM calls | `max-autotune` benchmarks a list of Triton configs and GEMM backends | PyTorch training and inference, JIT in-process |
+| XLA | Google, now OpenXLA | JAX, TensorFlow, PyTorch/XLA, via StableHLO | HLO | Own LLVM IR emitters; Triton for GEMM/softmax fusions on NVIDIA; library custom calls | Analytical cost model for fusion; GEMM autotuning | JAX, TPUs, large SPMD training |
+| Apache TVM | UW research (2018) | ONNX, PyTorch, TF into Relax (formerly Relay) | Relax | TIR, lowered to LLVM, CUDA, ROCm, Vulkan, Metal | AutoTVM, Ansor, MetaSchedule search with learned cost models | Deployment to many hardware targets; MLC-LLM |
+| IREE | Google origin; AMD (via Nod.ai) is a major contributor | StableHLO, TOSA, torch-mlir, ONNX | MLIR (`linalg`, `flow`, `stream`, `hal`) | MLIR codegen for LLVM-CPU, ROCm/HIP, CUDA, SPIR-V/Vulkan, Metal | Tuning specs written in the Transform dialect | Ahead-of-time deployment, from mobile to MI300X |
+| Triton | OpenAI | `@triton.jit` Python | None (kernel-level only) | MLIR: `ttir` → `ttgir` → LLVM IR → AMDGCN/PTX | `triton.autotune` over a config list | Hand-written kernels; Inductor's GPU backend |
+| MIGraphX | AMD | ONNX, Torch-MIGraphX | Own graph IR | Library calls (rocBLAS/hipBLASLt, MIOpen) plus generated kernels for fused ops | Optional exhaustive tuning | ONNX inference on AMD GPUs; ONNX Runtime execution provider |
+
+### MLIR: dialects and progressive lowering
+
+**What MLIR is.** MLIR is not a compiler for any particular language. It is LLVM-project infrastructure for *building* compilers: an SSA IR whose instruction set is extensible. Its building blocks:
+
+- **Operation.** Everything is an op, including modules, functions, and loops. An op has a name `dialect.op`, SSA operands and results, compile-time **attributes**, and optional nested **regions** (blocks of ops). Regions are how a loop body or a GPU kernel body lives inside its parent op.
+- **Dialect.** A namespace of ops, types, and attributes at one level of abstraction, for example `linalg`, `scf`, `gpu`, or `rocdl`. A single module can mix dialects freely.
+- **Interfaces.** Ops declare capabilities such as `TilingInterface` or `DestinationStyleOpInterface`. A tiling pass written once against the interface then works for every op that implements it, from any dialect.
+- **Passes and the conversion framework.** A pass rewrites the IR. A *conversion* declares target dialects legal and source dialects illegal, then applies rewrite patterns until no illegal op remains. Canonicalization and CSE run between passes.
+- **Tools.** `mlir-opt` runs passes, `mlir-translate` exports the `llvm` dialect to real LLVM IR. Downstream projects ship their own drivers (`iree-opt`, `triton-opt`).
+
+**Why not lower straight to LLVM IR?** LLVM IR has only scalars, vectors, loads, stores, and branches. Once a matmul becomes three loops with loads and stores, the fact that it was a matmul is gone, and recovering it ("raising") is fragile. Tiling for LDS, choosing an MFMA instruction, or fusing a bias add is easy while the IR still says "matmul" and hard afterwards. MLIR keeps each abstraction level as its own dialect and lowers one step at a time (**progressive lowering**). Each pass does one job at the level where that job is easy. Frontends and backends also share the middle dialects, so N frameworks and M targets need roughly N + M lowerings instead of N × M.
+
+| Level | Dialects | What the IR holds |
+|---|---|---|
+| Framework / graph | `torch` (torch-mlir), `stablehlo`, `tosa`, `tt` (Triton) | Whole-tensor ops with framework semantics |
+| Structured tensor ops | `linalg`, `tensor` | Ops described as loop nests by indexing maps; tiling and fusion happen here |
+| Buffers | `memref`, `bufferization` | Memory with shapes, strides, and layouts; `tensor` to `memref` conversion |
+| Loops and vectors | `scf`, `affine`, `vector` | Explicit loops and n-D vector ops |
+| Parallel hardware | `gpu`, `amdgpu`, `nvgpu` | Kernel launches, workgroup/thread ids, barriers, MFMA/WMMA ops |
+| Target | `llvm`, `rocdl`, `nvvm` | 1:1 with LLVM IR and target intrinsics; exported with `mlir-translate` |
+| Cross-cutting | `arith`, `math`, `func`, `cf`, `transform` | Scalar math, functions, control flow, schedules written as IR |
+
+A complete program in upstream dialects, `relu(x @ w + b)`. It compiles and runs with IREE (shown later), and `iree-opt`/`mlir-opt` can lower it pass by pass:
+
+```text
+// mlp.mlir -- y = relu(x @ w + b), written in upstream MLIR dialects
+#map_bias = affine_map<(i, j) -> (j)>
+#map_id   = affine_map<(i, j) -> (i, j)>
+func.func @mlp(%x: tensor<4x8xf32>, %w: tensor<8x16xf32>,
+               %b: tensor<16xf32>) -> tensor<4x16xf32> {
+  %zero = arith.constant 0.0 : f32
+  %empty = tensor.empty() : tensor<4x16xf32>
+  %acc = linalg.fill ins(%zero : f32) outs(%empty : tensor<4x16xf32>) -> tensor<4x16xf32>
+  %mm = linalg.matmul ins(%x, %w : tensor<4x8xf32>, tensor<8x16xf32>)
+                      outs(%acc : tensor<4x16xf32>) -> tensor<4x16xf32>
+  %y = linalg.generic
+         {indexing_maps = [#map_id, #map_bias, #map_id],
+          iterator_types = ["parallel", "parallel"]}
+         ins(%mm, %b : tensor<4x16xf32>, tensor<16xf32>)
+         outs(%empty : tensor<4x16xf32>) {
+    ^bb0(%m: f32, %bias: f32, %out: f32):
+      %s = arith.addf %m, %bias : f32
+      %r = arith.maximumf %s, %zero : f32
+      linalg.yield %r : f32
+  } -> tensor<4x16xf32>
+  return %y : tensor<4x16xf32>
+}
+```
+
+Three ideas in this snippet carry most of MLIR-based codegen:
+
+- **`linalg.generic` is a loop nest written as data.** The `indexing_maps` say which element of each operand iteration `(i, j)` touches (the bias map `(i, j) -> (j)` is a broadcast), and `iterator_types` mark each loop as parallel or reduction. From these alone, a pass knows the loop bounds, which loops it may parallelize, and exactly which slice of each operand a tile needs. That is why tiling, fusion, interchange, and vectorization can be written once for all ops.
+- **Value semantics first, memory later.** `tensor` values are immutable SSA values, so rewrites cannot break aliasing. Buffers (`memref`) are introduced late by **bufferization**.
+- **Destination-passing style.** `outs(...)` names where a result should go, which lets bufferization write in place instead of allocating.
+
+Running `iree-opt mlp.mlir --one-shot-bufferize="bufferize-function-boundaries" --convert-linalg-to-loops --canonicalize` shows two lowering steps (abridged output):
+
+```text
+// fragment -- abridged output of the pass pipeline above
+func.func @mlp(%arg0: memref<4x8xf32, strided<[?, ?], offset: ?>>, ...) -> memref<4x16xf32> {
+  %alloc = memref.alloc() alignment = 64 : memref<4x16xf32>   // ONE buffer
+  scf.for %i = %c0 to %c4 step %c1 {                           // linalg.fill
+    scf.for %j = %c0 to %c16 step %c1 {
+      memref.store %cst, %alloc[%i, %j] : memref<4x16xf32> } }
+  scf.for %i = %c0 to %c4 step %c1 {                           // linalg.matmul
+    scf.for %j = %c0 to %c16 step %c1 {
+      scf.for %k = %c0 to %c8 step %c1 {
+        %a = memref.load %arg0[%i, %k] ...
+        %b = memref.load %arg1[%k, %j] ...
+        %c = memref.load %alloc[%i, %j] ...
+        %p = arith.mulf %a, %b : f32
+        %s = arith.addf %c, %p : f32
+        memref.store %s, %alloc[%i, %j] : memref<4x16xf32> } } }
+  scf.for %i ... { scf.for %j ... {                            // bias + relu, IN PLACE
+        %v = memref.load %alloc[%i, %j] ...
+        ...  arith.addf, arith.maximumf ...
+        memref.store %r, %alloc[%i, %j] : memref<4x16xf32> } }
+  return %alloc : memref<4x16xf32>
+}
+```
+
+The bias+relu `generic` had `outs(%empty)`, but bufferization saw that `%mm` is dead after it and reused the matmul's buffer. Only one 4×16 allocation remains. The output also shows why fusion must happen *before* this point: after lowering to `scf` loops, the three loop nests are just loads and stores.
+
+**Schedules as IR: the Transform dialect.** A *transform script* is MLIR that manipulates other MLIR. It plays the role of a TVM schedule (below), and IREE accepts tuning specs in this form. This script tiles a 128×256×64 matmul into 32×16 output tiles (one per workgroup) with a sequential K loop of step 8:
+
+```text
+// tile.mlir -- run: iree-opt tile.mlir --transform-interpreter --canonicalize
+func.func @matmul(%a: tensor<128x256xf32>, %b: tensor<256x64xf32>,
+                  %c: tensor<128x64xf32>) -> tensor<128x64xf32> {
+  %r = linalg.matmul ins(%a, %b : tensor<128x256xf32>, tensor<256x64xf32>)
+                     outs(%c : tensor<128x64xf32>) -> tensor<128x64xf32>
+  return %r : tensor<128x64xf32>
+}
+
+module attributes {transform.with_named_sequence} {
+  transform.named_sequence @__transform_main(%root: !transform.any_op {transform.readonly}) {
+    %mm = transform.structured.match ops{["linalg.matmul"]} in %root
+        : (!transform.any_op) -> !transform.any_op
+    // Tile M and N by 32x16 into an scf.forall (one tile per workgroup / thread)
+    %tiled, %forall = transform.structured.tile_using_forall %mm tile_sizes [32, 16]
+        : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+    // Inside each tile, tile K by 8 with a sequential scf.for (the reduction loop)
+    %tiled2, %kloop = transform.structured.tile_using_for %tiled tile_sizes [0, 0, 8]
+        : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+    transform.yield
+  }
+}
+```
+
+The result is an `scf.forall (%i, %j) in (4, 4)` whose body extracts a 32×256 slice of A and a 256×16 slice of B, then runs `scf.for %k = 0 to 256 step 8` around a 32×8 by 8×16 `linalg.matmul`. That is the same structure as the hand-written LDS-tiled GEMM, produced by a 3-line schedule. Changing `[32, 16]` to `[64, 64]` is a one-token change. That is what makes schedules searchable.
+
+**Triton is an MLIR compiler too.** Its stages, as cached under `~/.triton/cache`, are `.ttir` (`tt` dialect: block-level `tt.load`, `tt.dot`), `.ttgir` (`ttg` dialect: the same ops annotated with **layout encodings** such as `#blocked`, `#ttg.amd_mfma`, `#ttg.nvidia_mma`, and `#ttg.shared`, which say which thread holds which element), `.llir` (LLVM IR, via the `llvm` and `rocdl`/`nvvm` dialects), and finally `.amdgcn` + `.hsaco` on AMD or `.ptx` + `.cubin` on NVIDIA. "Triton IR" and TTIR in the [25.4 diagram](#254-compilation-pipeline) are the same `tt` dialect. The interesting AMD passes run on TTGIR: converting `tt.dot` to MFMA layouts, stream pipelining through LDS, and instruction scheduling hints. `MLIR_ENABLE_DUMP=1` prints the IR after every pass (see [47.4](#474-triton-on-amd-backend-specifics)).
+
+### XLA: HLO, StableHLO, and fusion
+
+**HLO** (High Level Operations) is XLA's graph IR: about 100 coarse ops (`dot`, `convolution`, `reduce`, `broadcast`, `while`, `conditional`, `all-reduce`, ...). It is purely functional, its shapes are **static**, and each array carries an explicit layout (`f32[1024,4096]{1,0}` means dimension 1 is minor, i.e. row-major). Control flow and collectives are ops in the graph, so XLA sees and schedules the whole program, including communication.
+
+**StableHLO** is the portable, versioned MLIR dialect in front of XLA, with backward-compatibility guarantees for serialized programs. JAX emits StableHLO. PyTorch/XLA and torch-mlir can produce it, and both XLA and IREE consume it.
+
+The XLA:GPU pipeline, in order:
+
+1. **SPMD partitioning** (GSPMD, or the newer Shardy propagation): sharding annotations are propagated, and the compiler inserts the collectives. This is how `jax.jit` with `NamedSharding` works (section 20).
+2. **Simplification**: algebraic simplifier, CSE, constant folding, and layout assignment.
+3. **GEMM handling**: `dot` ops are rewritten into library custom calls (cuBLASLt on NVIDIA, hipBLASLt/rocBLAS on ROCm), absorbing bias and activation epilogues where the library supports them. On NVIDIA, many GEMM fusions go to Triton instead, and XLA autotunes the choice.
+4. **Fusion**: **priority fusion**. For each producer, an analytical cost model estimates run time with the producer duplicated and fused into *all* of its consumers versus unfused. The estimate is max(compute time, memory time) plus launch overhead. The most beneficial fusions are applied first, and producers with negative benefit are left alone. Then **multi-output fusion** merges siblings that read the same input, and a producer whose result is also needed elsewhere. **Horizontal fusion** batches many small independent ops into one launch.
+5. **Scheduling**: the latency-hiding scheduler orders ops so asynchronous collectives overlap with compute.
+6. **Buffer assignment**: whole-program liveness analysis assigns and reuses buffers. Peak memory is known at compile time.
+7. **Codegen**: XLA emits LLVM IR directly for loop, reduction, and transpose fusions and compiles it with the LLVM NVPTX or AMDGPU backend. It uses Triton for GEMM and softmax-style fusions on NVIDIA and calls libraries for the rest. ROCm builds use hipBLASLt/rocBLAS, MIOpen, and RCCL in the corresponding places.
+
+Fusion kinds you will see in dumps: `kLoop` (elementwise, iterating over the output shape), `kInput` (reduction-rooted, iterating over the reduction's input), `kOutput`, and `kCustom` (Triton GEMM fusions and library fusions).
+
+**Worked example.** One GELU layer plus a row sum, inspected without a GPU:
+
+```python
+# jax_hlo.py -- run: XLA_FLAGS="--xla_dump_to=/tmp/xla --xla_dump_hlo_as_text" python jax_hlo.py
+import jax
+import jax.numpy as jnp
+
+def f(x, w, b):
+    y = jax.nn.gelu(x * w + b, approximate=True)
+    return y, jnp.sum(y, axis=-1)
+
+x = jnp.ones((1024, 4096), jnp.float32)
+w = jnp.ones((4096,), jnp.float32)
+b = jnp.zeros((4096,), jnp.float32)
+
+lowered = jax.jit(f).lower(x, w, b)
+print(lowered.as_text())             # StableHLO: what JAX hands to XLA
+print(lowered.compile().as_text())   # optimized HLO: after fusion, layouts, buffers
+```
+
+The StableHLO has 11 full-size elementwise ops (`multiply`, `add`, the tanh-GELU polynomial, `tanh`) plus a `reduce`. The optimized HLO (checked with JAX 0.12 on CPU) collapses all 11 into one `kLoop` fusion, with the reduction in a second fusion:
+
+```text
+// fragment -- abridged optimized HLO
+%multiply_multiply_fusion = f32[1024,4096]{1,0} fusion(%b.1, %x.1, %w.1),
+    kind=kLoop, calls=%fused_computation.1, metadata={op_name="jit(f)/mul" ...}
+%ynn_fusion = f32[1024]{0} fusion(%multiply_multiply_fusion), kind=kCustom, ...
+ROOT %tuple.1 = (f32[1024,4096]{1,0}, f32[1024]{0}) tuple(...)
+```
+
+Each 1024×4096 f32 tensor is 16 MiB. Run unfused, the 11 elementwise ops read 14 full-size operands and write 11 results: 25 × 16 MiB = 400 MiB of traffic. The fused loop reads `x` once and writes `y` once (32 MiB), which is 12.5× less. The reduction then reads `y` again (16 MiB). On GPU, multi-output fusion can produce `y` and the row sums from one kernel and save that re-read. The `metadata={op_name=...}` on every fused instruction is how a profiler maps a kernel back to user code. The `--xla_dump_to` directory holds `*.before_optimizations.txt` and `*.<platform>_after_optimizations.txt` (for example `gpu_after_optimizations.txt`) for every compiled module.
+
+**Static shapes are the price.** `jax.jit` caches one executable per (shapes, dtypes, static arguments). A new sequence length means a retrace and a full XLA compile. The standard fix is to pad or bucket inputs to a few sizes (for example powers of two) and mask the padding. Inductor took the opposite approach with symbolic `SymInt` sizes (section 8.6).
+
+**XLA vs Inductor:**
+
+| Aspect | XLA | TorchInductor |
+|---|---|---|
+| Capture | Trace a pure function; Python control flow runs at trace time | Dynamo bytecode analysis with guards; unsupported code causes graph breaks |
+| Graph IR | HLO: about 100 coarse ops, static shapes, explicit layouts | FX graph of core ATen ops, then Inductor's loop-level IR |
+| Dynamic shapes | Static; each new shape is a new compile | Symbolic sizes ("automatic dynamic" after the first change) |
+| Fusion decision | Priority fusion driven by an analytical cost model, plus multi-output and horizontal fusion | Greedy scheduler: scores node pairs by memory traffic saved, checks loop compatibility; vertical and horizontal fusion; epilogue fusion into Triton GEMM templates under `max-autotune` |
+| Kernel codegen | LLVM IR emitters, Triton (GEMM/softmax fusions on NVIDIA), library custom calls | Triton source (GPU), C++/OpenMP (CPU), extern library GEMMs |
+| Control flow | First-class `while`/`conditional` ops (`lax.scan`, `lax.cond`) | `torch.cond`/`while_loop` higher-order ops; otherwise graph breaks or unrolling |
+| Distribution | Inside the compiler: SPMD partitioner inserts collectives, scheduler overlaps them | Mostly outside: DDP/FSDP2/DTensor; compiled functional collectives |
+| Memory planning | Whole-program buffer assignment; donated inputs | Buffer reuse within each graph; caching allocator between graphs |
+| Fallback | None: the whole function must be traceable | Falls back to eager at graph breaks and after `recompile_limit` |
+| Inspect | `XLA_FLAGS=--xla_dump_to=...`, `lowered.as_text()` | `TORCH_LOGS=output_code`, `tlparse` |
+| Kernel names in a trace | Named after the fusion, such as `loop_multiply_fusion`, `input_reduce_fusion`, `triton_gemm_dot.6` (names vary by version) | `triton_poi_fused_*` (pointwise), `triton_red_fused_*` (reduction), `triton_per_fused_*` (persistent reduction), `triton_tem_fused_*` (template GEMM) |
+
+The practical consequence: XLA rewards programs written as one big static, functional graph and gives you whole-program optimization, including communication. Inductor accepts arbitrary PyTorch and optimizes whatever it can capture, at the cost of guards, graph breaks, and recompiles.
+
+### TVM: separating the algorithm from the schedule, then searching
+
+TVM borrowed Halide's central idea: the **algorithm** (what to compute) is written once, and the **schedule** (loop order, tiling, parallel mapping, memory staging) is a separate program of transformations that cannot change the result. Relax (formerly Relay) is the graph IR, and TIR is the loop-level IR that schedules transform.
+
+| Schedule primitive | Effect | GPU/CPU meaning |
+|---|---|---|
+| `split(loop, factors)` | One loop becomes several nested loops | Creates tile levels |
+| `reorder(...)` | Permutes loops | Puts the unit-stride loop innermost; the tile loops outermost |
+| `fuse(l1, l2)` | Merges two loops into one | Flattens before binding to a 1-D grid |
+| `parallel` / `bind(loop, "blockIdx.x")` | Maps a loop to threads | CPU threads; GPU workgroups and threads |
+| `vectorize`, `unroll` | Inner-loop code shape | SIMD lanes; ILP |
+| `cache_read` / `cache_write` | Stages a tile in a faster scope | LDS (`shared`) or registers (`local`) |
+| `compute_at` / `reverse_compute_at` | Moves a producer inside a consumer's loop | Loop-level fusion |
+| `decompose_reduction`, `rfactor` | Splits init from update; parallelizes a reduction | Hoists `C = 0`; splits K across threads |
+| `tensorize` | Replaces an inner loop nest with a hardware intrinsic | MFMA / Tensor Core / VNNI instructions |
+
+The script below writes a 1024³ matmul once, then builds it with the default schedule and with a hand-written one. It is verified with `apache-tvm` 0.27 on CPU. TVM's Python API changes between releases: older versions spell these `tvm.tir.Schedule`, `sch.get_block`, and `tvm.nd.array`, and accept target strings like `"llvm -mcpu=..."`, which 0.27 rejects in favor of a JSON-style dict.
+
+```python
+# tvm_sched.py -- algorithm vs schedule (apache-tvm 0.27, CPU/LLVM, requires numpy)
+import time
+import numpy as np
+import tvm
+from tvm import te, s_tir
+
+M = N = K = 1024
+# ---- Algorithm: WHAT to compute (no loop order, no tiling) ----
+A = te.placeholder((M, K), "float32", name="A")
+B = te.placeholder((K, N), "float32", name="B")
+k = te.reduce_axis((0, K), name="k")
+C = te.compute((M, N), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name="C")
+func = te.create_prim_func([A, B, C])
+
+def build(mod):
+    return tvm.compile(mod, target="llvm")
+
+def bench(lib):
+    dev = tvm.cpu()
+    a = tvm.runtime.tensor(np.random.rand(M, K).astype("float32"), dev)
+    b = tvm.runtime.tensor(np.random.rand(K, N).astype("float32"), dev)
+    c = tvm.runtime.tensor(np.zeros((M, N), "float32"), dev)
+    lib(a, b, c)  # warm-up
+    t0 = time.perf_counter(); lib(a, b, c); dt = time.perf_counter() - t0
+    np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-3)
+    return dt
+
+# ---- Schedule 1: default loop nest (i, j, k) ----
+naive = build(tvm.IRModule({"main": func}))
+
+# ---- Schedule 2: HOW to compute it -- tile, reorder, vectorize, parallelize ----
+sch = s_tir.Schedule(func)
+blk = sch.get_sblock("C")
+i, j, kk = sch.get_loops(blk)
+io, ii = sch.split(i, factors=[None, 32])
+jo, ji = sch.split(j, factors=[None, 64])
+ko, ki = sch.split(kk, factors=[None, 4])
+sch.reorder(io, jo, ko, ii, ki, ji)   # ji innermost: unit stride in B and C
+sch.parallel(io)
+sch.vectorize(ji)
+sch.decompose_reduction(blk, ko)      # hoist C = 0 out of the k loop
+tuned = build(sch.mod)
+
+print(f"naive: {bench(naive)*1e3:8.1f} ms")
+print(f"tiled: {bench(tuned)*1e3:8.1f} ms")
+print(sch.mod.script())               # the transformed TIR
+```
+
+On a 96-core EPYC 9655 this printed `naive: 4822 ms` and `tiled: 3.2 ms`. The 1500× combines three effects: parallelizing the outer loop over cores, vectorizing the inner loop, and the reorder. The default `(i, j, k)` order walks `B` down a column with a 4 KiB stride, so nearly every access misses cache. The numerical result is identical. Only the schedule changed.
+
+**Why schedules must be searched.** Count the tilings of one 1024³ GEMM in Ansor's GPU tile structure, which splits each spatial loop into 5 levels and the reduction loop into 3:
+
+```python
+# space.py -- size of a TVM/Ansor-style tiling search space for one GEMM
+from math import comb
+
+def splits(n, parts):
+    """Ordered factorizations of n into `parts` factors (n a power of two)."""
+    e = n.bit_length() - 1                    # n = 2**e
+    return comb(e + parts - 1, parts - 1)     # stars and bars over the exponent
+
+M = N = K = 1024
+# GPU multi-level tiling "SSSRRSRS": spatial loops split 5 ways, reduction 3 ways
+spatial = splits(M, 5) * splits(N, 5)
+reduction = splits(K, 3)
+unroll_choices = 4                            # e.g. auto_unroll_max_step in {0,16,64,512}
+total = spatial * reduction * unroll_choices
+print(f"spatial={spatial:,} reduction={reduction} total~{total:,}")
+print(f"at 0.5 s per measured trial: {total*0.5/86400/365:.1f} years")
+```
+
+Output: `spatial=1,002,001 reduction=66 total~264,528,264` and `4.2 years`. That is for a single shape, before counting vectorization, LDS staging, and thread-binding choices. Exhaustive measurement is out of the question, which explains the design of TVM's three tuners:
+
+| Tuner | Search space comes from | Search strategy | Weakness |
+|---|---|---|---|
+| **AutoTVM** (2018) | A human-written schedule **template** with knobs (`cfg.define_split(...)`) | Simulated annealing guided by a gradient-boosted-tree (XGBoost) cost model trained online on measured configs | Template quality caps performance; one template per op and target |
+| **Ansor** (`auto_scheduler`, OSDI 2020) | Generated automatically: **sketches** from derivation rules (multi-level tiling `SSRSRS` on CPU / `SSSRRSRS` on GPU, inline elementwise ops, fuse consumers into tiles, add cache stages, `rfactor`), then **random annotation** of tile sizes, unroll, vectorize, and parallel | Evolutionary search (mutate tile sizes and annotations, crossover) scored by a learned cost model on program features; measure the top candidates on hardware; retrain; a **task scheduler** spends trials on the subgraphs that matter most for end-to-end latency | Hours of tuning per model; rules cannot invent new algorithms such as FlashAttention |
+| **MetaSchedule** (TVM Unity, 2022) | A schedule written as a **probabilistic program**: ordinary primitives plus sampling instructions (`sample_perfect_tile`, `sample_categorical`) | Same evolutionary search and cost model; the sampled decisions form a replayable **trace** | Same cost; unifies hand-written and automatic schedules in one API |
+
+Why the learned cost model: measuring one candidate costs about 0.1-1 s (compile, copy, warm-up, repeated timing), while the model scores thousands of candidates per second. Only the model's top-k are measured, and each measurement becomes new training data. A typical run is 1,000-20,000 measured trials per model. The results go to a tuning log keyed by (op, shape, dtype, target) and are reused at build time.
+
+Common pitfalls: tuned schedules are shape-specific (decode with batch 1 vs prefill with 4096 tokens need different tiles), so a dynamic-shape model needs bucketing or a fallback. GPU clocks boost and throttle, so use repeated runs with min or median. Tuning runs each kernel with a hot cache, which can mislead for kernels that run once per step in a real model. A schedule tuned on one GPU SKU (MI300X) may not be best on another (MI325X or MI355X).
+
+`triton.autotune`, Inductor's `max-autotune`, and PyTorch TunableOp (section 47.3) use the same measure-and-pick idea with no cost model. They work from a short hand-curated list (tens of configs) or a library's prebuilt solution list, which is why they finish in seconds to minutes. The core loop of any autotuner fits in a page of C++:
+
+```cpp
+// mini_autotune.cpp -- measure-driven search over one schedule knob (tile sizes)
+// Build: g++ -O3 -march=native -std=c++17 mini_autotune.cpp -o mini_autotune
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <random>
+#include <vector>
+
+constexpr int N = 512;  // C[N][N] += A[N][N] * B[N][N], row-major
+
+// The ALGORITHM is fixed; (TI, TJ, TK) is the SCHEDULE.
+void matmul_tiled(const float* A, const float* B, float* C, int TI, int TJ, int TK) {
+    std::fill(C, C + N * N, 0.0f);
+    for (int i0 = 0; i0 < N; i0 += TI)
+        for (int k0 = 0; k0 < N; k0 += TK)
+            for (int j0 = 0; j0 < N; j0 += TJ)
+                for (int i = i0; i < std::min(i0 + TI, N); ++i)
+                    for (int k = k0; k < std::min(k0 + TK, N); ++k) {
+                        const float a = A[i * N + k];
+                        for (int j = j0; j < std::min(j0 + TJ, N); ++j)  // unit stride: vectorizable
+                            C[i * N + j] += a * B[k * N + j];
+                    }
+}
+
+struct Config { int ti, tj, tk; double ms; };
+
+int main() {
+    std::vector<float> A(N * N), B(N * N), C(N * N), ref(N * N, 0.0f);
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (auto& x : A) x = dist(rng);
+    for (auto& x : B) x = dist(rng);
+    for (int i = 0; i < N; ++i)                       // reference, plain i-k-j order
+        for (int k = 0; k < N; ++k)
+            for (int j = 0; j < N; ++j) ref[i * N + j] += A[i * N + k] * B[k * N + j];
+
+    const int tiles[] = {8, 16, 32, 64, 128, 256, 512};
+    std::vector<Config> results;
+    for (int ti : tiles) for (int tj : tiles) for (int tk : tiles) {
+        double best = 1e30;
+        for (int rep = 0; rep < 3; ++rep) {           // best of 3 runs damps noise
+            auto t0 = std::chrono::steady_clock::now();
+            matmul_tiled(A.data(), B.data(), C.data(), ti, tj, tk);
+            auto t1 = std::chrono::steady_clock::now();
+            best = std::min(best, std::chrono::duration<double, std::milli>(t1 - t0).count());
+        }
+        for (int idx = 0; idx < N * N; ++idx)         // every candidate must be correct
+            if (std::fabs(C[idx] - ref[idx]) > 1e-3f) { std::printf("WRONG\n"); return 1; }
+        results.push_back({ti, tj, tk, best});
+    }
+    std::sort(results.begin(), results.end(),
+              [](const Config& a, const Config& b) { return a.ms < b.ms; });
+    const double gflop = 2.0 * N * N * N / 1e9;
+    std::printf("%zu configs measured\n", results.size());
+    for (int r = 0; r < 3; ++r)
+        std::printf("best #%d: TI=%3d TJ=%3d TK=%3d  %6.2f ms  %5.1f GFLOP/s\n", r + 1,
+                    results[r].ti, results[r].tj, results[r].tk, results[r].ms, gflop / results[r].ms * 1e3);
+    const Config& w = results.back();
+    std::printf("worst  : TI=%3d TJ=%3d TK=%3d  %6.2f ms  (%.1fx slower than best)\n",
+                w.ti, w.tj, w.tk, w.ms, w.ms / results[0].ms);
+}
+```
+
+On one EPYC 9655 core it measured 343 configs. The best was about 5.4 ms (49 GFLOP/s, with several configs within 1%), and the worst (`TI=8 TJ=8 TK=512`) was 9.3× slower. Both shapes are typical: the optimum is a flat plateau with many near-ties, and a bad schedule is an order of magnitude off. The rest of a real tuner is engineering around this loop: a cost model to prune, timeouts for configs that hang, isolating measurements from each other, and a persistent cache of results.
+
+### IREE: a whole-program MLIR compiler and runtime
+
+IREE compiles the **whole program**, including the host-side code that allocates buffers and schedules kernels, ahead of time into one deployable module. It runs that module with a small C runtime. Compare `torch.compile`, which only compiles kernels and graphs inside a live Python process.
+
+- **Inputs:** StableHLO (JAX), TOSA (TFLite), torch-mlir (PyTorch via `iree-turbine`), ONNX (`iree-import-onnx`).
+- **Output:** a `.vmfb` FlatBuffer holding VM bytecode for the host program and the compiled kernels for each target.
+- **Runtime HAL drivers:** `local-sync`, `local-task` (CPU), `hip`, `cuda`, `vulkan` (plus `metal` on Apple platforms).
+
+The compiler's phases are the values of `iree-compile --compile-to=`: `input` → `abi` → `preprocessing` → `global-optimization` → `dispatch-creation` → `flow` → `stream` → `executable-sources` → `executable-configurations` → `executable-targets` → `hal` → `vm` → `end`. The important ones:
+
+| Phase / dialect | Job |
+|---|---|
+| Global optimization | Whole-program rewrites: constant hoisting, propagating transposes and layouts across ops, data-tiling encodings |
+| Dispatch creation / `flow` | **Fusion.** Groups a root op (matmul, conv, reduction) with its elementwise producers and consumers into one dispatch region, which becomes one kernel |
+| `stream` | Asynchronous execution: partitions dispatches into command buffers, plans buffer lifetimes and allocation, and inserts timepoints (fences) |
+| `hal` | Per-target executables. Codegen (MLIR all the way down) picks a strategy per dispatch, then tiles to workgroups and subgroups, promotes to LDS, vectorizes, and maps to MFMA |
+| `vm` | Lowers the host program to a compact bytecode, or to C via EmitC |
+
+The `mlp.mlir` program from the MLIR section, compiled and run with the pip packages `iree-base-compiler` and `iree-base-runtime` (3.13):
+
+```bash
+# CPU: compile and run (x = 1, w = 0.5, b = -3  ->  relu(8*0.5 - 3) = 1 everywhere)
+iree-compile mlp.mlir --iree-hal-target-device=local \
+  --iree-hal-local-target-device-backends=llvm-cpu --iree-llvmcpu-target-cpu=host -o mlp.vmfb
+iree-run-module --module=mlp.vmfb --device=local-task --function=mlp \
+  --input="4x8xf32=1" --input="8x16xf32=0.5" --input="16xf32=-3"
+# -> result[0]: hal.buffer_view  4x16xf32=[1 1 1 ... 1]...
+
+# See the fusion decision: stop after dispatch formation
+iree-compile mlp.mlir --iree-hal-target-device=local \
+  --iree-hal-local-target-device-backends=llvm-cpu --compile-to=flow
+
+# AMD GPU (MI300X = gfx942); compiling needs no GPU, running does
+iree-compile mlp.mlir --iree-hal-target-device=hip --iree-rocm-target=gfx942 -o mlp_hip.vmfb
+iree-run-module --module=mlp_hip.vmfb --device=hip --function=mlp --input=...
+```
+
+The `--compile-to=flow` output contains exactly one `flow.executable` named `@mlp_dispatch_0_matmul_4x16x8_f32`, and its body holds the `linalg.fill`, the `linalg.matmul`, and the bias+relu `linalg.generic`. The matmul is the root, and the epilogue was fused into the same kernel. Dispatch names encode the root op and its shape, which helps when you read a `rocprofv3` kernel trace of an IREE program.
+
+For a 1024×1024 f16 matmul targeting gfx942, `--compile-to=executable-configurations` shows the strategy IREE chose: `pipeline = #iree_gpu.pipeline<TileAndFuse>`, `mma_kind = #iree_gpu.mma_layout<MFMA_F32_16x16x16_F16>`, `workgroup_size = [256, 1, 1]`, `subgroup_size = 64`. `--iree-hal-dump-executable-files-to=DIR` writes the intermediate `.ll`, the `.hsaco`, and a `.rocmasm` disassembly; that one contained 128 `v_mfma` instructions. Flag spellings have moved between releases (some earlier 3.x versions used `--iree-hip-target`), so check `iree-compile --help` against your version.
+
+When to choose IREE over `torch.compile`: you need deployment without Python, one compiler for several targets (CPU, AMD/NVIDIA GPUs, Vulkan on mobile), or whole-program memory planning. It is also AMD's own MLIR-based path (the SHARK / shark-ai stack). The costs: the whole model must be captured (there are no graph breaks to fall back on), and op coverage and performance depend on the import path. Dynamic dimensions are supported in the types (`tensor<?x4096xf16>`).
+
+### Fusion rules every ML compiler applies
+
+| Fusion | Example | Legal? | Profitable? |
+|---|---|---|---|
+| Vertical elementwise | `gelu(x*w + b)` | Always (same iteration space) | Almost always: removes a full HBM round trip per intermediate |
+| Reduction + producers | `sum(exp(x))` | Yes, the producer becomes the reduction's prologue | Yes |
+| Reduction + consumers | softmax: `exp(x - max) / sum(...)` | Needs the reduction result first. One kernel if a row fits in one workgroup (Inductor's "persistent reduction", XLA reduction emitters); otherwise multi-pass or an online algorithm | Yes when the row fits |
+| GEMM epilogue | bias, activation, residual add, output cast | Yes: applied to the accumulator tile before the store | Yes; supported by hipBLASLt epilogues, Triton templates, and XLA's GEMM rewriter |
+| GEMM prologue | dequantize or cast weights on load | Yes, but each A element is reloaded once per N-tile | Only if the prologue is cheap (see below) |
+| GEMM → GEMM | attention: `softmax(QKᵀ) V` | Not by generic rules. It needs an algorithmic change (online softmax), which is FlashAttention | Huge, but pattern-matched or hand-written |
+| Horizontal | per-parameter optimizer updates | Yes (independent ops) | Yes for many tiny kernels: saves launches (foreach / multi-tensor apply) |
+| Multi-output | `y` and `sum(y)` from one pass | Yes | Saves re-reading `y` |
+
+**Fusion can lose.** Three classic cases:
+
+1. **Recompute.** XLA's priority fusion duplicates a producer into *every* consumer. If an expensive producer (an `erf`/`exp` chain) feeds 3 consumers, fusing computes it 3 times. For a GEMM prologue the factor is the number of output tiles that reload each input element: with N = 4096 and `BLOCK_N` = 128, each element of A is loaded and transformed 32 times. That is fine for a cast or an int4 dequantize (a few ALU ops against a compute-bound GEMM) and wasteful for a transcendental.
+2. **Register pressure and occupancy.** A fused kernel holds every intermediate in VGPRs. On CDNA3, 512 VGPRs per SIMD lane are shared by the resident waves: a kernel using 64 VGPRs can keep 8 waves per SIMD, 128 VGPRs allows 4, and 256 allows 2. Fewer waves means less latency hiding, and spills go to scratch memory.
+3. **Lost library kernels.** Fusing an elementwise op into a GEMM can move the GEMM from a tuned hipBLASLt kernel to a generated one that is slower than the library kernel plus a separate cheap elementwise kernel. This is why Inductor benchmarks template-with-epilogue against extern-plus-separate-kernel under `max-autotune` before choosing.
+
+### Interview Questions
+
+**Q1.** What problem does MLIR solve that LLVM IR doesn't?
+
+**A.** LLVM IR is a single, low abstraction level: scalars, vectors, memory, and branches. ML compilers need to make decisions at higher levels: "this is a matmul, tile it for LDS and use MFMA", "these two tensor ops can fuse", "this tensor can be written in place". Once you are in LLVM IR, that structure is gone and recovering it is fragile. MLIR makes the IR extensible through dialects, so each level (`stablehlo`/`torch` → `linalg` → `memref`/`scf`/`vector` → `gpu`/`amdgpu` → `llvm`/`rocdl`) is first-class. Lowering is progressive, with each pass working where its job is easy. Interfaces such as `TilingInterface` let one transformation serve many ops, and projects reuse the middle of the stack: Triton, IREE, torch-mlir, rocMLIR, and XLA's newer emitters all build on MLIR. Follow-up, "what's the cost?": dialect sprawl, a moving upstream API (downstream projects pin an LLVM commit), and the need to define legality and conversion carefully at every level.
+
+**Q2.** Walk through how a `linalg.matmul` on tensors becomes AMDGCN.
+
+**A.** (1) Choose a strategy and tile sizes per target: for example IREE's TileAndFuse with `MFMA_F32_16x16x16_F16`, 256 threads per workgroup, wave64. (2) Tile and distribute: the outer tile loops become an `scf.forall` mapped to workgroups, and the inner level is mapped to subgroups (waves). Elementwise consumers are fused into the tile. (3) Tile the K reduction as a sequential `scf.for`, and promote A and B tiles to LDS (shared memory) so each element is loaded from HBM once per workgroup. (4) Vectorize: the inner tile becomes `vector` ops, then `amdgpu.mfma` (MFMA intrinsics) with the register layout that instruction requires. (5) Bufferize: `tensor` becomes `memref`, ideally in place through destination-passing style. (6) Lower `scf`/`vector`/`gpu`/`amdgpu` to the `llvm` + `rocdl` dialects, translate to LLVM IR, and let the LLVM AMDGPU backend handle register allocation, scheduling, and ISA emission into a `.hsaco` code object. Follow-ups: software pipelining (prefetch the next K tile into LDS or registers while computing the current one), LDS bank-conflict padding, and VGPR budget versus occupancy.
+
+**Q3.** Compare how XLA and TorchInductor decide what to fuse. Why does JAX need static shapes, and how do you serve variable-length inputs with it?
+
+**A.** XLA works on HLO, a static-shaped, whole-program graph. Its priority fusion pass uses an analytical cost model (max of compute and memory time, plus launch overhead) to estimate whether duplicating each producer into all its consumers lowers the total time. It applies the best fusions first, then adds multi-output and horizontal fusion. Inductor works on ATen graphs captured by Dynamo. Its scheduler greedily fuses pairs of nodes with compatible loop structure, ranked by memory traffic saved, and it can fuse epilogues into Triton GEMM templates when autotuning shows a win. Static shapes let XLA plan every buffer and pick every kernel at compile time, and they are a natural fit for TPUs. The price is a recompile for every new shape. For variable lengths: bucket to a few padded sizes (powers of two, or multiples of 128), mask the padding, and precompile each bucket at startup. Watch the trade-off between padding waste (compute on pad tokens) and compile count.
+
+**Q4.** Explain algorithm vs schedule. How does Ansor find a fast schedule without templates, and why does it need a learned cost model?
+
+**A.** The algorithm defines each output element mathematically (`C[i,j] = Σ_k A[i,k]·B[k,j]`). The schedule picks loop order, tiling, parallel mapping, vectorization, and memory staging, and cannot change the result. Separating them lets you keep one correct definition and search over performance. Ansor builds the space automatically. Derivation rules turn the compute DAG into a few *sketches* (multi-level tiling such as `SSSRRSRS` on GPU, inlined elementwise ops, consumers fused into tiles, cache stages). Random annotation fills in tile sizes and unroll/vectorize/parallel choices, and evolutionary search mutates the best programs. The space is astronomically large: about 2.6×10⁸ tilings for one 1024³ GEMM even before other knobs. A hardware measurement costs about 0.1-1 s, so Ansor ranks candidates with a learned cost model (gradient-boosted trees over program features) and measures only the top few. Each measurement then retrains the model. A task scheduler spreads the trial budget across a model's subgraphs according to their contribution to end-to-end latency. Follow-up, "why not just use a library?": libraries cover common ops and shapes. Search covers unusual shapes, fused ops, and new hardware before the libraries catch up.
+
+**Q5.** What is IREE, and when would you pick it over `torch.compile` or vLLM?
+
+**A.** IREE is an MLIR-based ahead-of-time compiler plus a small runtime. It compiles the whole program, kernels and the host scheduling logic alike, into a `.vmfb` module that runs without Python on CPU, ROCm/HIP, CUDA, Vulkan, or Metal. Its fusion is "dispatch region formation" in the `flow` phase: a root op such as a matmul with its elementwise producers and consumers becomes one kernel. Scheduling and memory planning happen in `stream`, and codegen happens per target in `hal`. Pick it for deployment without a Python runtime, many targets from one compiler, or embedded and mobile constraints. AMD also uses it in its SHARK stack. Pick `torch.compile` for PyTorch training and research, where eager fallback and quick iteration matter. Pick vLLM or SGLang for LLM serving, where the hard problems are scheduling and the KV cache (PagedAttention, continuous batching), not graph compilation.
+
+**Q6.** A profile of a compiled model shows hundreds of short kernels with generated names. As a profiling-tools engineer, how do you attribute GPU time back to framework ops?
+
+**A.** Use the compiler's naming and metadata, then join on kernel name. Inductor names kernels by kind and the ops fused into them (`triton_poi_fused_add_mul_0`, `triton_red_...`, `triton_per_...`, `triton_tem_...`). `TORCH_LOGS=output_code` shows each kernel's source annotated with the ATen ops it came from, and `torch.profiler` `record_function` ranges give the module context. XLA attaches `metadata={op_name="jit(f)/..." stack_frame_id=...}` to every HLO instruction, so the `--xla_dump_to` after-optimizations file maps each fusion name to user source lines. IREE dispatch names encode the root op and shape (`..._dispatch_0_matmul_4x16x8_f32`). In a `rocprofv3 --kernel-trace` capture, group by kernel name, sum durations, and join with the compiler's map. Hundreds of tiny kernels usually point to graph breaks, a disabled fusion, or missing HIP-graph capture, in which case launch overhead dominates. Check `TORCH_LOGS=graph_breaks,perf_hints` before tuning any single kernel. See [ROCm Profiling Tools](AMD_GPU_Architecture_and_Profiling.md#4-rocm-profiling-tools).
+
+**Q7.** When does fusion make things slower?
+
+**A.** (1) Recompute: duplicating an expensive producer into several consumers, or into a GEMM prologue where each input element is reloaded N/`BLOCK_N` times (32× for N = 4096, `BLOCK_N` = 128). (2) Register pressure: more live intermediates mean more VGPRs, lower occupancy (on CDNA3, 128 VGPRs allows 4 waves per SIMD and 256 allows 2), and possibly spills. (3) Losing a tuned library kernel: a generated GEMM with a fused epilogue can be slower than hipBLASLt plus a separate cheap elementwise kernel. (4) Lost parallelism: fusing a reduction with a large consumer can force a launch with too few workgroups to fill 304 CUs. Every compiler handles this with a cost model or by benchmarking alternatives, and that is the right answer in an interview: estimate bytes saved against recompute and occupancy cost, then measure.
 
 ---
 
@@ -1837,6 +2599,8 @@ def fast_matmul(a, b):
 # Enable XLA globally
 tf.config.optimizer.set_jit(True)
 ```
+
+See also [8.8 ML Compiler Stacks](#88-ml-compiler-stacks-mlir-xla-tvm-and-iree) for HLO/StableHLO, XLA's priority fusion, and a comparison with TorchInductor.
 
 ## 16.2 Mixed Precision
 
@@ -2618,6 +3382,8 @@ PTX (NVIDIA) or AMDGPU ISA (AMD)
 GPU Binary (cubin / hsaco)
 ```
 
+See also [8.8 ML Compiler Stacks](#88-ml-compiler-stacks-mlir-xla-tvm-and-iree) for MLIR dialects and progressive lowering, and for what the `ttir`/`ttgir` stages hold.
+
 ---
 
 # 26. Writing Triton Kernels
@@ -2889,7 +3655,7 @@ def debug_kernel(x_ptr, BLOCK_SIZE: tl.constexpr):
 
 ## 29.1 Triton for AMD (ROCm)
 
-Triton supports AMD GPUs through a ROCm backend that generates AMDGPU ISA instead of PTX. The same Triton kernel source code works on both NVIDIA and AMD hardware -- only the compilation backend changes.
+Triton supports AMD GPUs through a ROCm backend that generates AMDGPU ISA instead of PTX. The same Triton kernel source code works on both NVIDIA and AMD hardware -- only the compilation backend changes. Running correctly is not the same as running fast, though. On AMD a "warp" is a 64-wide wavefront, MFMA instruction shape and occupancy are tuned through AMD-only knobs (`matrix_instr_nonkdim`, `waves_per_eu`), and good `num_stages` values differ from NVIDIA's. See [47.4 Triton on AMD: Backend Specifics](#474-triton-on-amd-backend-specifics).
 
 ## 29.2 OpenAI Triton vs NVIDIA Triton Inference Server
 
@@ -2978,13 +3744,22 @@ vLLM is a high-throughput, memory-efficient inference and serving engine for Lar
 During autoregressive LLM generation, each token's attention requires the Key and Value tensors of all previous tokens. These KV pairs must be stored in GPU memory.
 
 ```
-Memory per token per layer:
-  2 (K + V) × n_heads × head_dim × dtype_size
+KV-cache bytes per token:
+  2 (K + V) × n_layers × n_kv_heads × head_dim × dtype_bytes
 
-Example (LLaMA-70B, FP16):
-  2 × 64 heads × 128 dim × 2 bytes × 80 layers = 2.6 MB per token
-  2048-token sequence = ~5.3 GB per request
+Example (LLaMA-2/3-70B, BF16/FP16): 80 layers, 64 query heads but only
+8 KV heads (grouped-query attention, GQA), head_dim 128:
+  2 × 80 × 8 × 128 × 2 B = 327,680 B ≈ 0.33 MB (320 KiB) per token
+  2048-token sequence     = 671 MB ≈ 0.67 GB per request
+  128K-token context      ≈ 43 GB per request
+
+Same shape with plain multi-head attention (MHA, n_kv_heads = 64):
+  2 × 80 × 64 × 128 × 2 B ≈ 2.6 MB per token -> 5.4 GB per 2048 tokens (8× more)
 ```
+
+**Use `n_kv_heads`, not `n_heads`.** In MHA every query head has its own K/V head. GQA shares one K/V head across a group of query heads (LLaMA-2/3-70B: 64 query heads, 8 KV heads, groups of 8). MQA is the extreme case of a single KV head. The KV cache, and the HBM bytes read per decode step, shrink by `n_heads / n_kv_heads`. Quality stays close to MHA, which is why most modern LLMs use GQA. Reading `num_key_value_heads` (not `num_attention_heads`) from the model's `config.json` is the standard interview check.
+
+**Capacity sanity check (one MI300X, 192 GB):** 70B BF16 weights take about 140 GB. At `gpu-memory-utilization=0.9` (about 173 GB usable), roughly 30 GB remains for KV cache after activations and workspace. That is ~30e9 / 327,680 ≈ 90K tokens total, for example ~45 concurrent 2K-token requests. FP8 KV cache doubles it, and TP=2 more than doubles it because the weights are split. See [LLM and ML Fundamentals](../ml-gpu/LLM_and_ML_Fundamentals.md) for the attention math, and [ML Systems Design](../ml-gpu/ML_Systems_Design.md) for serving capacity planning.
 
 **Traditional approach:** Pre-allocate max-length contiguous buffers per request. Problem: massive internal fragmentation (most sequences don't reach max length) and external fragmentation (gaps between sequences).
 
@@ -3282,7 +4057,7 @@ python -m vllm.entrypoints.openai.api_server \
 | `max-model-len` | Maximum sequence length | Lower saves memory |
 | `enable-chunked-prefill` | Chunk long prefills | Improves decode latency |
 | `enable-prefix-caching` | Cache shared prefixes | Huge win for shared prompts |
-| `enforce-eager` | Disable CUDA graphs | Debugging only |
+| `enforce-eager` | Disable CUDA graphs (HIP graphs on ROCm) | Debugging only |
 | `dtype` | Model precision | `auto`, `float16`, `bfloat16` |
 
 ## 34.3 Interview Questions
@@ -3895,15 +4670,24 @@ Communication:   FP32 or BF16 (all-reduce can use reduced precision)
 Shards optimizer states across data-parallel ranks (similar to ZeRO Stage-1):
 
 ```
-Without distributed optimizer:
-  Each DP rank: full model params (FP32) + full Adam states (2 × FP32)
-  Memory per rank: 16 bytes per parameter
+Bytes per parameter (BF16 model params, FP32 main grads -- Megatron's default):
+  BF16 params 2 + FP32 grads 4 + FP32 main params 4 + Adam m 4 + Adam v 4
 
-With distributed optimizer:
-  Each DP rank: 1/DP of model params (FP32) + 1/DP of Adam states
-  Memory per rank: 16/DP bytes per parameter
-  Communication: all-gather params before forward, reduce-scatter grads after backward
+Without distributed optimizer (replicated on every DP rank):
+  2 + 4 + 12                 = 18 bytes per parameter
+  (16 bytes if grads are kept in BF16: 2 + 2 + 12)
+
+With distributed optimizer (only the 12 B of FP32 main params + Adam
+state is sharded; BF16 params and the grad buffer stay full-size):
+  2 + 4 + 12/DP bytes per parameter   (e.g. DP = 8 -> 7.5 B instead of 18 B)
+  Communication: reduce-scatter grads after backward (each rank gets the
+  grads for its shard), local Adam step, all-gather updated BF16 params.
+  Same element count as the all-reduce it replaces (about P per phase per
+  rank). With FP32 grads and a BF16 param all-gather it actually moves fewer
+  bytes: 4 + 2 instead of 4 + 4 per element.
 ```
+
+The general ZeRO-1/2/3 formulas, a 70B worked example, and offload are in [section 45](#45-training-memory-math-zero-activations-and-offload).
 
 ## 43.3 Activation Checkpointing
 
@@ -4056,10 +4840,10 @@ Context parallelism splits the sequence dimension across GPUs specifically for t
 | Mixed precision | `torch.amp` | BF16/FP16 native | FP16/BF16/FP8 |
 | Activation checkpointing | `checkpoint()` | Selective/full | Partition-based |
 | Optimizer sharding | FSDP | Distributed optimizer | ZeRO Stage 1/2/3 |
-| Offloading | Not built-in | Not built-in | CPU/NVMe offload |
+| Offloading | CPU offload (FSDP `CPUOffload`, FSDP2 `CPUOffloadPolicy`) | Limited (optimizer CPU offload in recent Megatron-Core) | CPU/NVMe offload (ZeRO-Offload/Infinity) |
 | Model scale | Medium (1-30B easy) | Large (100B+ designed for) | Large (supports offloading) |
 | Ease of setup | Moderate | Complex | Moderate (config-based) |
-| Ecosystem | PyTorch native | NVIDIA-specific | Microsoft, open-source |
+| Ecosystem | PyTorch native | NVIDIA-led (AMD maintains a ROCm port) | Microsoft, open-source |
 
 ## 44.5 Quantization Methods Comparison
 
@@ -4089,3 +4873,730 @@ Context parallelism splits the sequence dimension across GPUs specifically for t
 | Multi-framework inference | ONNX Runtime |
 | Scientific computing with AD | JAX |
 | Long-context training (100K+ tokens) | Megatron-LM with context parallelism |
+| Mixture-of-Experts training | Megatron-Core MoE (EP + TP + PP) or DeepSpeed-MoE; see section 46 |
+| Running any of the above on AMD Instinct | Same stacks on ROCm builds; see section 47 |
+
+---
+
+# 45. Training Memory Math: ZeRO, Activations, and Offload
+
+---
+
+"Will it fit, and on how many GPUs?" is the first question in any large-training design interview. Training memory has four parts: **model state** (weights, gradients, optimizer state), **activations** saved for backward, **temporary buffers** (communication buckets, gathered parameters, workspace), and **fragmentation**. Model state is exact arithmetic. Activations are an estimate you then confirm with a memory snapshot.
+
+## 45.1 Bytes per Parameter: Mixed-Precision Adam
+
+| Component | Dtype | Bytes/param | Why it exists |
+|---|---|---|---|
+| Weights used in forward/backward | BF16 | 2 | Matrix units run at BF16 rate |
+| Gradients | BF16 | 2 | Output of backward |
+| Master weights | FP32 | 4 | BF16 updates would round away (see [8.7](#87-number-formats-and-mixed-precision-numerics)) |
+| Adam first moment `m` | FP32 | 4 | Momentum |
+| Adam second moment `v` | FP32 | 4 | Per-parameter adaptive LR |
+| **Total** | | **16** | 2 + 2 + 12 |
+
+Variants change the constant but not the method:
+- FP32 gradient accumulation with a separate persistent BF16 weight copy (Megatron default) gives 2 + 4 + 12 = **18 B**. FSDP with `reduce_dtype=float32` stays at **16 B** (fp32 sharded params 4 + fp32 grads 4 + Adam 8) because its BF16 weights exist only transiently during the all-gather (see [7.4](#74-fsdp-fully-sharded-data-parallel)).
+- Pure FP32 training with Adam gives 4 + 4 + 8 = **16 B** (no separate master copy).
+- 8-bit Adam states (bitsandbytes) give roughly 2 + 2 + 4 + 2 = **10 B**.
+- SGD with momentum and no master copy gives 2 + 2 + 4 = **8 B**.
+- Inference keeps weights only: **2 B** (BF16), **1 B** (FP8/INT8), or **0.5 B** (INT4), plus KV cache.
+
+Write the formula as `(w + g + K) * P` with K = 12 for mixed-precision Adam. That is the notation of the ZeRO paper (Rajbhandari et al., 2020), which uses Ψ for P.
+
+## 45.2 ZeRO Stages: Per-GPU Formulas
+
+With P parameters and N data-parallel ranks:
+
+| Stage | What is sharded | Model-state bytes per GPU | Communication per step (elements) |
+|---|---|---|---|
+| DDP (ZeRO-0) | Nothing | `(2 + 2 + 12) P = 16P` | All-reduce grads ≈ 2P (reduce-scatter + all-gather) |
+| ZeRO-1 (`P_os`) | Optimizer state | `4P + 12P/N` | 2P: reduce-scatter grads, all-gather updated params |
+| ZeRO-2 (`P_os+g`) | + gradients | `2P + 14P/N` | 2P: same as DDP, but grads are reduce-scattered bucket by bucket and freed |
+| ZeRO-3 (`P_os+g+p`) / FSDP `FULL_SHARD` | + parameters | `16P/N` | **3P**: all-gather params in forward, all-gather again in backward, reduce-scatter grads (1.5× DDP) |
+| HSDP / ZeRO++ hpZ | ZeRO-3 within a node, replicate across nodes | `16P/N_node` | Slow inter-node link carries only the gradient all-reduce |
+
+ZeRO-1 and ZeRO-2 cost the same communication as DDP: an all-reduce *is* a reduce-scatter plus an all-gather, and ZeRO just runs the optimizer between the two halves. That is why ZeRO-1/2 is almost always worth enabling. ZeRO-3 adds one extra parameter all-gather, which must be overlapped by prefetching the next layer's parameters. See [Collective Communication](../ml-gpu/Parallel_GPU_Programming.md#3-collective-communication) for ring all-reduce cost.
+
+## 45.3 Worked Example: 70B Model on 64 GPUs
+
+P = 70e9, N = 64 (8 nodes × 8 MI300X, 192 GB HBM each; the same numbers apply to 80 GB parts, which are stricter):
+
+```python
+# zero_memory.py -- per-GPU training memory for mixed-precision Adam under ZeRO stages
+GB = 1e9
+
+def model_state_bytes(params: float, n_dp: int, stage: int,
+                      w_bytes: int = 2, g_bytes: int = 2, opt_bytes: int = 12) -> float:
+    """ZeRO paper accounting: bf16 weights (2) + bf16 grads (2) + fp32 master/m/v (12)."""
+    if stage == 0:   # plain DDP: everything replicated
+        return params * (w_bytes + g_bytes + opt_bytes)
+    if stage == 1:   # shard optimizer state
+        return params * (w_bytes + g_bytes) + params * opt_bytes / n_dp
+    if stage == 2:   # + shard gradients
+        return params * w_bytes + params * (g_bytes + opt_bytes) / n_dp
+    if stage == 3:   # + shard parameters
+        return params * (w_bytes + g_bytes + opt_bytes) / n_dp
+    raise ValueError(stage)
+
+def activation_bytes(seq: int, mbs: int, hidden: int, layers: int, tp: int = 1,
+                     full_recompute: bool = False) -> float:
+    """Korthikanti et al. 2022, 16-bit activations, flash attention (no s^2 term), SP with TP."""
+    per_layer = 34 * seq * mbs * hidden / tp
+    if full_recompute:   # keep only each layer's input; recompute one layer at a time
+        return layers * 2 * seq * mbs * hidden / tp + per_layer
+    return layers * per_layer
+
+P, N = 70e9, 64
+for stage in range(4):
+    print(f"ZeRO-{stage}: {model_state_bytes(P, N, stage) / GB:8.1f} GB/GPU model state")
+
+layer_params = P / 80                         # ~0.875e9 params per transformer layer
+working = 2 * layer_params * 2 + layer_params * 2  # 2 gathered bf16 layers (prefetch) + 1 layer of grads
+print(f"ZeRO-3 working set (gathered layers + unsharded grads): {working / GB:.1f} GB")
+
+for rc in (False, True):
+    a = activation_bytes(seq=4096, mbs=1, hidden=8192, layers=80, full_recompute=rc)
+    print(f"activations (s=4096, b=1, h=8192, L=80, recompute={rc}): {a / GB:.1f} GB")
+```
+
+Output and interpretation:
+
+```text
+ZeRO-0:   1120.0 GB/GPU model state      -> impossible (16 B x 70e9)
+ZeRO-1:    293.1 GB/GPU model state      -> 4 x 70 = 280 GB of bf16 weights+grads alone: no
+ZeRO-2:    155.3 GB/GPU model state      -> fits 192 GB on paper, ~37 GB left for activations: impractical
+ZeRO-3:     17.5 GB/GPU model state      -> fits easily
+ZeRO-3 working set (gathered layers + unsharded grads): 5.2 GB
+activations (s=4096, b=1, h=8192, L=80, recompute=False): 91.3 GB
+activations (s=4096, b=1, h=8192, L=80, recompute=True): 6.5 GB
+```
+
+Total for ZeRO-3 with full activation recompute: ≈ 17.5 + 5.2 + 6.5 ≈ **29 GB** per GPU plus allocator overhead. That fits comfortably and leaves room for a larger micro-batch, or for turning recompute off for some layers. Without recompute, 17.5 + 5.2 + 91 ≈ 114 GB fits a 192 GB MI300X but not an 80 GB GPU. There you would add TP = 8 within the node, which divides both the weight shards and, with sequence parallelism, the activations by 8.
+
+## 45.4 Activation Memory and Checkpointing
+
+Korthikanti et al. (2022, "Reducing Activation Recomputation in Large Transformer Models") estimate the activations of one GPT-style layer, in bytes with 16-bit activations, as:
+
+```text
+per layer ≈ s · b · h · (34 + 5 · a · s / h)
+  s = sequence length, b = micro-batch, h = hidden size, a = attention heads
+  34·sbh     : QKV/MLP inputs and outputs, GeLU input, LayerNorm inputs, dropout masks
+  5·a·s²·b   : attention scores, softmax output, softmax dropout mask -> NOT stored with FlashAttention
+with TP = t and sequence parallelism: divide everything by t
+full recompute: keep only each layer's input, 2·s·b·h bytes, and recompute the layer in backward
+```
+
+The coefficient 34 assumes a 4h GeLU MLP and MHA. LLaMA's SwiGLU (three matrices, about 3.5h intermediate) and GQA shift it. Use the formula for order of magnitude, then confirm with `torch.cuda.memory._record_memory_history()` and the snapshot viewer (see 8.4).
+
+| Strategy | Saved per layer | Extra compute | Typical use |
+|---|---|---|---|
+| None | everything (~34·sbh) | 0 | Small models, short sequences |
+| Selective (Megatron `--recompute-activations`) | all but the attention core (the `5as/h` term) | ~2-5% | Large models without fused attention. FlashAttention already avoids storing the s² tensors, so it gains little there |
+| Full (`--recompute-granularity full`, `torch.utils.checkpoint`) | layer input only (2·sbh) | ~1 extra forward ≈ +33% of step FLOPs | Long sequences, memory-bound configs |
+| Offload activations to CPU | none on GPU | PCIe traffic | Last resort |
+
+**FLOP accounting:** training costs about 6·N_params FLOPs per token (2 forward, 4 backward). Full recompute adds another 2 forward, for 8. **MFU** (model FLOPs utilization) counts only the 6, while **HFU** (hardware FLOPs utilization) counts the 8. Report MFU when comparing configurations, otherwise recompute looks like a win.
+
+```python
+# fragment -- full activation checkpointing per transformer block
+from torch.utils.checkpoint import checkpoint
+def forward(self, x):
+    for blk in self.blocks:
+        x = checkpoint(blk, x, use_reentrant=False)  # non-reentrant: works with FSDP/compile, kwargs
+    return x
+```
+
+## 45.5 ZeRO-Offload and ZeRO-Infinity
+
+When GPU count is the constraint (fine-tuning a 70B model on one node, say), trade bandwidth for capacity:
+
+| Technique | Where state lives | Who runs the optimizer | Bottleneck |
+|---|---|---|---|
+| **ZeRO-Offload** (DeepSpeed) | FP32 master + Adam state (+ grads) in CPU DRAM; BF16 weights on GPU | CPU (vectorized "CPU Adam") | PCIe: grads to host (2 B/param), updated params back (2 B/param) each step; CPU Adam throughput |
+| **ZeRO-Infinity** | Params, grads, and optimizer state in CPU DRAM **and/or NVMe** | CPU, overlapped | NVMe/PCIe bandwidth; it partitions offload traffic across all GPUs ("bandwidth-centric") and prefetches |
+| FSDP CPU offload | FSDP1 `CPUOffload(offload_params=True)`; FSDP2 `fully_shard(..., offload_policy=CPUOffloadPolicy())` | CPU | Same PCIe limits |
+
+Back-of-envelope for ZeRO-Offload on 70B: about 140 GB of gradients go host-bound and 140 GB of BF16 params come back each step, *spread across* the GPUs that share the work. On 8 GPUs that is 17.5 GB each way per GPU. At an effective ~50 GB/s per PCIe Gen5 x16 link, that is ≈ 0.35 s per direction per step, before CPU Adam time (840 GB of FP32 state to stream through host memory). Offload is viable when steps are long anyway (large batch, long sequences). It is a poor fit for throughput-oriented pretraining, where adding GPUs or TP is cheaper.
+
+## 45.6 Interview Questions
+
+**Q1.** Estimate the GPUs needed to full-fine-tune a 7B model with AdamW in BF16 mixed precision on 80 GB GPUs.
+
+**A.** Model state is 16 B × 7e9 = 112 GB, so plain DDP does not fit on one 80 GB GPU. With ZeRO-3/FSDP over N GPUs the state is 112/N GB: N = 2 gives 56 GB, which leaves ~20 GB for activations (tight). N = 4 gives 28 GB and is comfortable. ZeRO-2 on 4 GPUs gives 2×7 + 14×7/4 = 14 + 24.5 = 38.5 GB, which also works and saves the extra parameter all-gather. Answer: 4 GPUs, with ZeRO-2 or FSDP, plus activation checkpointing if sequences are long. Mention the 18 B variant if grads are FP32.
+
+**Q2.** Why is ZeRO-1/2 "free" in communication but ZeRO-3 is not?
+
+**A.** DDP's ring all-reduce is a reduce-scatter followed by an all-gather, about 2P elements per rank. ZeRO-1/2 splits those two halves: after the reduce-scatter each rank owns the summed gradient shard for its optimizer partition, steps it, and all-gathers the updated parameters. The total is the same 2P. ZeRO-3 also discards the parameters after use, so they must be all-gathered again for backward, for 3P total (1.5×). It also puts the all-gathers on the critical path unless they are prefetched one layer ahead.
+
+**Q3.** When would you choose HSDP (hybrid sharding) over full sharding?
+
+**A.** When inter-node bandwidth is much lower than intra-node bandwidth (xGMI/NVLink at hundreds of GB/s vs a 400 Gb/s = 50 GB/s NIC) and the model fits when sharded within one node. HSDP shards within the node, so the per-layer all-gathers stay on the fast fabric, and only gradient all-reduces across replicas go over the network. Memory per GPU is 16P/8 instead of 16P/N_total.
+
+**Q4.** You're at the memory limit. Rank these by preference: activation checkpointing, larger TP, ZeRO-3, CPU offload, smaller micro-batch.
+
+**A.** It depends on what dominates. If model state dominates, use ZeRO-3/FSDP first (communication cost overlappable), then TP within a node (also cuts activations, but adds per-layer all-reduces on the critical path). If activations dominate, use selective or full recompute (~2-33% compute), then sequence/context parallelism. A smaller micro-batch hurts GEMM efficiency and, with pipelining, increases the bubble. CPU offload comes last because PCIe-bound steps are slow. Always confirm with a memory snapshot. Fragmentation (`expandable_segments:True` in the allocator config) can explain "OOM with 10 GB free".
+
+---
+
+# 46. Mixture of Experts and Expert Parallelism
+
+---
+
+## 46.1 What MoE Changes
+
+A Mixture-of-Experts layer replaces the dense FFN in a transformer block with **E expert FFNs** and a **router**. Each token is processed by only its top-k experts, so **parameters scale with E while FLOPs per token scale with k**.
+
+| Model | Total params | Active params/token | Experts | Routing |
+|---|---|---|---|---|
+| Switch Transformer | up to 1.6T | ~dense base | up to 2048 | top-1 |
+| Mixtral 8x7B | 46.7B | 12.9B | 8 per layer | top-2 |
+| DeepSeek-V3 | 671B | 37B | 256 routed + 1 shared per MoE layer | top-8, auxiliary-loss-free balancing |
+
+```text
+            x (token, hidden h)
+                 │
+        router: logits = x·W_g  (h × E), softmax
+                 │ top-k
+     ┌───────────┼───────────┐
+     ▼           ▼           ▼
+  expert 3    expert 7    (others skipped)
+     │           │
+     └── weighted sum by renormalized gate probs ──► y
+```
+
+Consequences you should state in an interview:
+- **Memory** scales with *total* params, because every expert must be resident somewhere. **Compute** scales with *active* params. A 671B MoE needs 671B-model memory but runs at roughly 37B-dense FLOPs per token.
+- Decode for small batches is memory-bandwidth-bound on the experts actually hit. At large batch almost every expert is hit each step, so you read all expert weights.
+- A *dynamic, data-dependent* communication pattern appears: tokens have to travel to wherever their experts live.
+
+## 46.2 Routing, Capacity Factor, and Token Dropping
+
+Fixed-shape kernels and buffers need a bound on how many tokens an expert receives:
+
+```text
+capacity C = ceil(capacity_factor × T × k / E)
+  T = tokens in the routing group (e.g. per device micro-batch), k = experts per token
+  capacity_factor 1.0-1.25 is typical for training; larger values for eval
+Tokens routed to a full expert are DROPPED: they skip the FFN and pass through the residual.
+```
+
+Example: T = 4096 tokens, E = 8, k = 2, CF = 1.25 gives C = ceil(1.25 × 4096 × 2 / 8) = 1280 slots per expert. Perfect balance would put 1024 tokens in each. A hot expert receiving 2000 drops 720.
+
+**Dropless MoE** (MegaBlocks; Megatron-Core with `--moe-grouped-gemm` and no capacity factor) avoids dropping. Experts take variable-sized batches through a grouped or block-sparse GEMM, at the cost of variable-size all-to-all and load imbalance showing up as stragglers rather than as quality loss.
+
+## 46.3 Load-Balancing Losses
+
+Without pressure, the router collapses onto a few experts: they get trained more, so they get chosen more. The **Switch Transformer auxiliary loss**:
+
+```text
+L_aux = α · E · Σ_i f_i · P_i
+  f_i = fraction of token assignments dispatched to expert i   (hard counts, no gradient)
+  P_i = mean router probability for expert i over the batch    (differentiable)
+  α ≈ 1e-2;  L_aux / α = 1.0 at perfect balance, larger when skewed
+```
+
+Gradients flow through `P_i`, which pushes probability mass away from over-used experts. Related techniques:
+- **Router z-loss** (ST-MoE): `mean(logsumexp(logits)^2)`, which keeps router logits small for numerical stability.
+- **Auxiliary-loss-free balancing** (DeepSeek-V3): a per-expert bias added to the logits *only for top-k selection*, nudged up or down after each step according to load. It balances without an extra loss term that fights the language-modeling objective.
+- **Device- or node-limited routing**: cap the number of devices or nodes a token's experts may span, which bounds all-to-all fan-out.
+
+```python
+# moe.py -- top-k MoE layer with capacity factor and Switch-style load-balancing loss (CPU-runnable)
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class TopKMoE(nn.Module):
+    def __init__(self, d_model, d_ff, n_experts, k=2, capacity_factor=1.25, aux_coeff=1e-2):
+        super().__init__()
+        self.E, self.k, self.cf, self.aux_coeff = n_experts, k, capacity_factor, aux_coeff
+        self.router = nn.Linear(d_model, n_experts, bias=False)
+        self.w1 = nn.Parameter(torch.randn(n_experts, d_model, d_ff) * d_model ** -0.5)
+        self.w2 = nn.Parameter(torch.randn(n_experts, d_ff, d_model) * d_ff ** -0.5)
+
+    def forward(self, x):                                  # x: [T, d_model] (batch*seq flattened)
+        T, E, k = x.shape[0], self.E, self.k
+        probs = self.router(x).softmax(dim=-1)             # [T, E]
+        top_p, top_e = probs.topk(k, dim=-1)               # [T, k]
+        top_p = top_p / top_p.sum(dim=-1, keepdim=True)    # renormalize over chosen experts
+
+        # Switch-Transformer load-balancing loss: E * sum_i f_i * P_i  (== 1.0 when perfectly uniform)
+        f = F.one_hot(top_e, E).float().sum(dim=1).mean(dim=0) / k   # fraction of assignments per expert
+        P = probs.mean(dim=0)                                        # mean router prob per expert
+        aux = self.aux_coeff * E * torch.sum(f * P)
+
+        capacity = math.ceil(self.cf * T * k / E)          # slots per expert
+        flat_e = top_e.reshape(-1)                         # [T*k]
+        flat_t = torch.arange(T).repeat_interleave(k)      # token id of each assignment
+        flat_p = top_p.reshape(-1)
+        out = torch.zeros_like(x)
+        dropped = 0
+        for e in range(E):                                 # real kernels: one grouped GEMM over all experts
+            idx = (flat_e == e).nonzero(as_tuple=True)[0]
+            if idx.numel() > capacity:                     # overflow: drop (token keeps its residual path)
+                dropped += idx.numel() - capacity
+                idx = idx[:capacity]
+            tok = flat_t[idx]
+            h = F.silu(x[tok] @ self.w1[e]) @ self.w2[e]
+            out.index_add_(0, tok, h * flat_p[idx, None])
+        return out, aux, dropped, capacity
+
+torch.manual_seed(0)
+moe = TopKMoE(d_model=64, d_ff=256, n_experts=8, k=2)
+x = torch.randn(1024, 64)
+y, aux, dropped, cap = moe(x)
+print(f"capacity/expert={cap}  dropped={dropped}  balance={aux.item() / moe.aux_coeff:.3f} (1.0 = uniform)")
+
+with torch.no_grad():                                      # skew the router toward expert 0
+    moe.router.weight[0] += 0.05                       # expert 0 favored for inputs along all-ones
+y, aux, dropped, cap = moe(x + 1.0)                        # shifted inputs -> hot expert
+print(f"skewed router:     dropped={dropped}  balance={aux.item() / moe.aux_coeff:.3f}")
+(y.pow(2).mean() + aux).backward()                         # aux loss pushes the router back toward balance
+print("router grad norm:", round(moe.router.weight.grad.norm().item(), 4))
+```
+
+On CPU this prints `capacity/expert=320 dropped=0 balance=1.001`, then for the skewed router `dropped=1099 balance=2.884`. A hot expert both drops more than half of the 2048 assignments and raises the auxiliary loss.
+
+## 46.4 Expert Parallelism and All-to-All
+
+With **expert parallelism (EP)** of degree `ep`, each rank holds `E/ep` experts. Attention and other dense parts are usually data-parallel (or TP) across the same ranks. A MoE layer then runs:
+
+```text
+1. route locally                  (each rank: its T tokens -> top-k expert ids)
+2. all-to-all DISPATCH            (send each token's hidden vector to the rank owning its expert)
+3. grouped GEMM over local experts (variable tokens per expert)
+4. all-to-all COMBINE             (send results back to the token's home rank)
+5. weighted sum + residual
+Backward repeats 2 and 4 in reverse: 4 all-to-alls per MoE layer per training step.
+```
+
+**Volume per all-to-all, per rank:** `T × k × h × bytes × (ep - 1)/ep`. Example: T = 8192 tokens per GPU, k = 2, h = 4096, BF16 gives 8192 × 2 × 4096 × 2 B ≈ **134 MB**. Across a 50 GB/s (400 Gb/s) NIC that is ~2.7 ms. With 32 MoE layers × 4 all-to-alls = 128 per step, that is ≈ **0.34 s per step** if nothing overlaps. Hence the standard practices:
+- Keep EP inside a node where possible (xGMI/NVLink), or limit nodes per token.
+- Overlap dispatch/combine with shared-expert or attention compute.
+- Use FP8 dispatch.
+- Balance load: all-to-all latency is set by the *most loaded* rank.
+
+Unlike all-reduce, all-to-all has no reduction, so it does not shrink with ring tricks. Every byte must cross the network once (see the all-to-all section in [Collective Communication](../ml-gpu/Parallel_GPU_Programming.md#3-collective-communication)).
+
+**Framework knobs.**
+- Megatron-Core: `--num-experts`, `--moe-router-topk`, `--expert-model-parallel-size`, `--moe-aux-loss-coeff`, `--moe-grouped-gemm`, `--moe-token-dispatcher-type alltoall`. EP is carved out of the DP dimension, so expert gradients are reduced over `DP/EP` replicas.
+- DeepSpeed-MoE offers equivalent options.
+- vLLM inference: `--enable-expert-parallel`. On ROCm, fused MoE kernels come from AITER when `VLLM_ROCM_USE_AITER=1` (section 47).
+
+## 46.5 Interview Questions
+
+**Q1.** Mixtral 8x7B has 46.7B parameters but is "as fast as a 13B model." Explain, and say when that claim breaks.
+
+**A.** Only the attention blocks (shared) and 2 of 8 expert FFNs run per token, about 12.9B active parameters, so FLOPs per token match a ~13B dense model. The claim breaks for (1) **memory**: all 46.7B must be resident (93 GB in BF16); (2) **large-batch decode**: different tokens hit different experts, so each step reads nearly all expert weights and the step is bandwidth-bound like a 47B model; (3) **multi-GPU**: all-to-all and load imbalance add latency that a dense 13B model doesn't pay.
+
+**Q2.** What is the capacity factor and what happens if you set it too low or too high?
+
+**A.** It sets per-expert buffer slots as `CF × T·k/E`. Too low (≤1.0): imbalance causes tokens to be dropped (skipping the FFN), which hurts quality, especially early in training. Too high: wasted compute and memory on padding, and larger all-to-all buffers. Dropless implementations remove the trade-off by using variable-size grouped GEMMs, moving the cost to load-imbalance stragglers.
+
+**Q3.** Derive the Switch auxiliary loss's minimum and explain why it uses both `f` and `P`.
+
+**A.** `L/α = E·Σ f_i P_i`. With uniform routing f_i = P_i = 1/E, giving E·E·(1/E²) = 1. Because f is produced by top-k on the same probabilities, f ≈ P. Then E·Σ P_i² ≥ E·(Σ P_i)²/E = 1 by Cauchy-Schwarz, with equality only at P_i = 1/E. So 1.0 is the minimum, and any skew raises it. (For arbitrary unrelated f and P the product could be smaller; the bound relies on their coupling.) `f_i` (hard dispatch fraction) measures the actual load but is not differentiable through the top-k. `P_i` is differentiable, so the product applies gradient to the probabilities in proportion to the actual load.
+
+**Q4.** You add EP=8 to a model and step time rises 40%. Where do you look?
+
+**A.** In the trace, look at the all-to-all kernels: their duration, whether they overlap with compute, and their skew across ranks. Then check tokens per expert per rank (router imbalance makes one rank the straggler), whether EP crosses nodes (switch to intra-node EP or node-limited routing), grouped-GEMM efficiency with small per-expert batches (many experts with few tokens each makes the GEMMs memory-bound), and whether dispatch is padding to capacity. Fixes: rebalance (aux coefficient or bias-based balancing), keep EP intra-node, overlap dispatch with shared-expert compute, and use FP8 dispatch.
+
+---
+
+# 47. The ROCm ML Stack
+
+---
+
+How the frameworks in this guide run on AMD Instinct GPUs (MI300X/MI325X = gfx942, MI350X/MI355X = gfx950), and which libraries actually execute each op. HIP-level programming is covered in [HIP Fundamentals](../ml-gpu/Parallel_GPU_Programming.md#25-hip-fundamentals-and-portability) and the [ROCm library map](../ml-gpu/Parallel_GPU_Programming.md#31-rocm-ecosystem-and-libraries). Hardware details and counters are in [AMD GPU Architecture and Profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md).
+
+## 47.1 How PyTorch Runs on ROCm
+
+- **Hipify at build time.** PyTorch has one CUDA-flavored source tree. A ROCm build first runs the hipify step (`tools/amd_build/build_amd.py`), which rewrites CUDA sources and APIs into HIP: `cudaMalloc` becomes `hipMalloc`, cuBLAS calls go to hipBLAS/hipBLASLt, cuDNN calls go to MIOpen, and NCCL calls go to RCCL. The result is compiled with the ROCm clang toolchain for the architectures in `PYTORCH_ROCM_ARCH` (e.g. `gfx942;gfx950`). This is source translation, not runtime emulation.
+- **The `cuda` name is kept on purpose.** Dispatch keys, `torch.cuda.*`, the `"cuda"` device string, `torch.cuda.Stream/Event/CUDAGraph`, and the `"nccl"` process-group backend all keep their names. On ROCm they are backed by HIP streams, events, and graphs and by RCCL, so unmodified model code runs.
+- **Detecting ROCm:** `torch.version.hip` is a version string on ROCm builds and `None` on CUDA builds, while `torch.version.cuda` is `None` on ROCm. `torch.cuda.get_device_properties(0).gcnArchName` returns e.g. `gfx942:sramecc+:xnack-`.
+- **C++/CUDA extensions:** `torch.utils.cpp_extension.CUDAExtension` and `load()` hipify `.cu` sources automatically on ROCm builds. Inline PTX, warp-size-32 assumptions (`__shfl_sync` with a 32-bit mask, `if (lane < 32)`), and cuBLAS-only features are the usual porting breakages (see [CUDA-to-HIP Porting](../ml-gpu/Parallel_GPU_Programming.md#29-cuda-to-hip-porting)).
+- **Device visibility:** `ROCR_VISIBLE_DEVICES` filters at the ROCr (HSA) runtime level and is what AMD recommends for isolation on Linux. Schedulers set it. `HIP_VISIBLE_DEVICES` (and `CUDA_VISIBLE_DEVICES`, also honored by HIP) filter at the HIP level, *indexing into whatever ROCr already exposes*. Setting both with physical IDs is a classic "no GPUs found" bug. MI300X compute-partition modes (SPX/DPX/QPX/CPX) change how many logical GPUs one package exposes, up to 8 in CPX.
+
+## 47.2 Which Library Runs Each Op
+
+| PyTorch op family | CUDA library | ROCm library | Notes |
+|---|---|---|---|
+| `mm`, `addmm`, `bmm`, `linear` | cuBLAS / cuBLASLt | **hipBLASLt** (preferred on MI300-class) or **rocBLAS** via hipBLAS | Selection by heuristic; `TORCH_BLAS_PREFER_HIPBLASLT=1/0` or `torch.backends.cuda.preferred_blas_library()` overrides. Both use Tensile-generated kernels (names start with `Cijk_`) |
+| FP8 GEMM (`torch._scaled_mm`) | cuBLASLt | hipBLASLt | FNUZ FP8 on gfx942, OCP FP8 on gfx950 (see 8.7) |
+| Convolution, BatchNorm (the `cudnn` path) | cuDNN | **MIOpen** | `torch.backends.cudnn.*` flags apply to MIOpen. Its find/tuning results are cached in `~/.config/miopen` (user DB) and `~/.cache/miopen` (kernels) |
+| SDPA flash / mem-efficient attention | FlashAttention / cuDNN | **AOTriton** (default) or **Composable Kernel** | `torch.backends.cuda.preferred_rocm_fa_library("ck")` or `TORCH_ROCM_FA_PREFER_CK=1` |
+| Collectives (`backend="nccl"`) | NCCL | **RCCL** | Honors `NCCL_*` env vars (`NCCL_DEBUG=INFO`) |
+| FFT, RNG, sparse, linalg | cuFFT, cuRAND, cuSPARSE, cuSOLVER | rocFFT/hipFFT, rocRAND/hipRAND, rocSPARSE/hipSPARSE, rocSOLVER/hipSOLVER | |
+| Inductor-generated pointwise/reduction/GEMM templates | Triton (PTX) | Triton (AMDGCN) | Section 47.4 |
+| LLM inference kernels (vLLM/SGLang) | FlashInfer, CUTLASS, custom CUDA | **AITER** | Section 47.5 |
+
+- **Composable Kernel (CK):** AMD's C++ template library for tile-based, MFMA-aware kernels (GEMM with fused epilogues, fused attention forward and backward, grouped GEMM, convolution). It is AMD's counterpart to CUTLASS/CuTe. MIOpen, PyTorch's CK SDPA backend, the ROCm FlashAttention port, and AITER build on it.
+- **AITER (AI Tensor Engine for ROCm):** a Python-callable operator library of the hottest LLM ops: MHA/MLA attention (prefill and decode), fused MoE, block-scaled FP8 GEMM, RMSNorm, RoPE, and custom all-reduce. Each op is implemented with whichever backend is fastest (CK, Triton, or hand-written assembly). vLLM and SGLang call it when enabled. The first run JIT-builds kernels into `~/.cache/aiter`.
+
+## 47.3 TunableOp and GEMM Selection
+
+BLAS heuristics pick a kernel per GEMM shape without benchmarking, and for unusual shapes the choice can be far from optimal. **TunableOp** benchmarks every candidate rocBLAS and hipBLASLt solution for each GEMM shape the program actually runs, records the winner in a CSV, and reuses it afterwards. It also works on CUDA, where it ranks cuBLASLt heuristic candidates.
+
+```bash
+# Phase 1 -- tune on a representative run (slow: each new shape is benchmarked)
+PYTORCH_TUNABLEOP_ENABLED=1 PYTORCH_TUNABLEOP_TUNING=1 \
+PYTORCH_TUNABLEOP_FILENAME=tunableop_results.csv \
+    python train.py --steps 50          # writes tunableop_results0.csv, ...1.csv: device ordinal inserted per GPU
+
+# Phase 2 -- production: read the table, never tune
+PYTORCH_TUNABLEOP_ENABLED=1 PYTORCH_TUNABLEOP_TUNING=0 \
+PYTORCH_TUNABLEOP_FILENAME=tunableop_results.csv python train.py
+
+# Offline variant: record untuned shapes cheaply (-> tunableop_untuned0.csv), tune later;
+# mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus) spreads tuning over GPUs
+PYTORCH_TUNABLEOP_ENABLED=1 PYTORCH_TUNABLEOP_TUNING=0 PYTORCH_TUNABLEOP_RECORD_UNTUNED=1 python serve.py
+python -c "import torch.cuda.tunable as t; t.enable(); t.tuning_enable(); t.tune_gemm_in_file('tunableop_untuned0.csv')"
+```
+
+Pitfalls:
+1. Results are specific to GPU model, ROCm, and library versions. The CSV header records validators, and mismatched entries are ignored.
+2. Workloads with many distinct shapes (LLM serving with variable batch × sequence) can spend a long time tuning. Record offline, or tune only the steady-state shapes.
+3. Tuning on a busy or thermally throttled GPU picks wrong winners.
+4. Retuning can change the selected kernel and therefore the last bits of results (see non-determinism in 8.7).
+
+Also set `PYTORCH_TUNABLEOP_VERBOSE=1` once to confirm TunableOp is actually engaged.
+
+## 47.4 Triton on AMD: Backend Specifics
+
+| Concept | NVIDIA | AMD CDNA (MI200/MI300/MI350) |
+|---|---|---|
+| SIMT width | warp = 32 threads | **wavefront = 64** lanes (RDNA consumer GPUs default to wave32) |
+| `num_warps=4` means | 128 threads per CTA | **256** work-items per workgroup |
+| Matrix instruction | `mma` / `wgmma` | **MFMA** (`v_mfma_f32_16x16x16_bf16`, `32x32x8`, ...) |
+| On-chip scratchpad | shared memory (up to ~228 KB/SM on H100) | **LDS**: 64 KB per CU on MI300X, 160 KB on MI350-series |
+| Async copy / TMA | `cp.async`, TMA, warp specialization | No TMA on CDNA3; software pipelining through registers and LDS |
+
+AMD-specific `triton.Config` knobs (from AMD's MI300X workload-optimization guide and the Triton HIP tutorials):
+
+| Knob | Meaning | Guidance |
+|---|---|---|
+| `matrix_instr_nonkdim` | MFMA tile shape: 16 → `mfma_16x16`, 32 → `mfma_32x32` | On MI300X, 16 usually wins |
+| `waves_per_eu` | Occupancy hint: the compiler limits VGPRs per wave so that N waves fit per SIMD (EU) | Try 0 (no hint), 1, 2, 3. Higher means fewer registers per wave and possible spills |
+| `num_stages` | Software-pipelining depth | AMD guidance: **2** for a single GEMM, **1** for fused GEMM chains and non-GEMM kernels (stages cost LDS) |
+| `num_warps` | Wavefronts per workgroup | 4 or 8 typical for GEMM. Remember each is 64 lanes |
+| `BLOCK_M/N/K` | Tile sizes | Constrained by LDS: a 256×64 A tile plus a 64×256 B tile in BF16 is 32 KB + 32 KB = the whole 64 KB, so `num_stages=2` does not fit on MI300X ("out of resources: shared memory") |
+
+```python
+# fragment -- AMD-aware autotune configs (AMD knobs ride in the kwargs dict)
+import triton
+
+def is_hip() -> bool:
+    return triton.runtime.driver.active.get_current_target().backend == "hip"
+
+def gemm_configs():
+    if is_hip():
+        return [
+            triton.Config({"BLOCK_M": 256, "BLOCK_N": 256, "BLOCK_K": 32, "GROUP_M": 8,
+                           "waves_per_eu": 2, "matrix_instr_nonkdim": 16}, num_warps=8, num_stages=2),
+            triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 8,
+                           "waves_per_eu": 0, "matrix_instr_nonkdim": 16}, num_warps=4, num_stages=2),
+        ]
+    return [triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64, "GROUP_M": 8},
+                          num_warps=8, num_stages=3)]
+```
+
+**Inspecting what the compiler did:**
+- `AMDGCN_ENABLE_DUMP=1` prints the ISA. Check the VGPR/SGPR counts, the LDS size, and any `scratch` (register spills).
+- `MLIR_ENABLE_DUMP=1` dumps every MLIR pass, which shows layouts and whether `tl.dot` became MFMA.
+- Compiled artifacts (`.amdgcn`, `.hsaco`, `.json` metadata) are cached under `~/.triton/cache` (`TRITON_CACHE_DIR`).
+
+Occupancy is VGPR-limited far more often than on NVIDIA: 512 VGPRs per SIMD lane shared among resident waves means a kernel using 256 VGPRs gets at most 2 waves per SIMD.
+
+## 47.5 vLLM and SGLang on ROCm
+
+- **Builds:** AMD publishes ROCm images (`rocm/vllm`, `rocm/sgl-dev`, and upstream `lmsysorg/sglang:*-rocm*`) with tuned PyTorch, Triton, hipBLASLt, RCCL, and AITER already combined. Prefer them over building from source unless you are developing the stack.
+- **AITER switch:** in vLLM, `VLLM_ROCM_USE_AITER=1` (default off) is the master switch. Per-op sub-switches (`VLLM_ROCM_USE_AITER_MHA`, `_MLA`, `_MOE`, `_RMSNORM`, `_LINEAR`, ...) default to on once it is set. SGLang uses `SGLANG_USE_AITER=1` with `--attention-backend aiter`. `--attention-backend triton` is the fallback when an AITER kernel fails on a given GPU or dtype.
+- **Other ROCm-specific paths in vLLM:**
+  - "Skinny" GEMM kernels for the small-M GEMMs of low-batch decode (`VLLM_ROCM_USE_SKINNY_GEMM`).
+  - Quick Reduce, a quantized custom all-reduce for TP (`VLLM_ROCM_QUICK_REDUCE_QUANTIZATION`).
+  - FP8 weight padding.
+  - FP8 OCP-to-FNUZ checkpoint conversion on gfx942.
+- **Memory changes the parallelism choice.** At 192 GB (MI300X) or 256 GB (MI325X), a 70B model in BF16 (~140 GB) fits on **one** GPU. For throughput, 8 independent TP=1 replicas (or DP attention) often beat one TP=8 instance because they skip the all-reduces. TP=2-8 is chosen for latency (TTFT/TPOT) or for longer contexts that need KV-cache room. Running the numbers per model is the interview answer. See [ML Systems Design](../ml-gpu/ML_Systems_Design.md).
+- **Graphs:** vLLM captures HIP graphs for a set of decode batch sizes, just as on CUDA. `--enforce-eager` disables them, which is useful for debugging and costly for small-batch latency.
+
+## 47.6 Environment Variable Cheat Sheet
+
+| Variable | Purpose |
+|---|---|
+| `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES` | GPU selection (ROCr-level vs HIP-level; see 47.1) |
+| `TORCH_BLAS_PREFER_HIPBLASLT=1` | Prefer hipBLASLt over rocBLAS for GEMMs |
+| `PYTORCH_TUNABLEOP_ENABLED/TUNING/FILENAME/VERBOSE/RECORD_UNTUNED` | TunableOp (47.3) |
+| `TORCH_ROCM_FA_PREFER_CK=1` | CK instead of AOTriton for SDPA flash attention |
+| `PYTORCH_HIP_ALLOC_CONF=expandable_segments:True` | Caching-allocator config (the HIP spelling of `PYTORCH_CUDA_ALLOC_CONF`); reduces fragmentation OOMs |
+| `TORCHINDUCTOR_MAX_AUTOTUNE=1`, `TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS` | Inductor autotuning |
+| `MIOPEN_FIND_MODE` (`NORMAL`/`FAST`/default `DYNAMIC_HYBRID`), `MIOPEN_USER_DB_PATH` | Convolution solver search vs startup time; where tuning results persist |
+| `NCCL_DEBUG=INFO`, `NCCL_MIN_NCHANNELS=112` | RCCL logging; more channels (AMD's MI300X recommendation for end-to-end workloads) |
+| `HIP_FORCE_DEV_KERNARG=1` | Put kernel arguments in device memory (lower launch latency; in AMD's MI300X tuning guide) |
+| `AMD_SERIALIZE_KERNEL=3` | Serialize kernel launches so errors surface at the faulting call (the ROCm analog of `CUDA_LAUNCH_BLOCKING=1`) |
+| `AMD_LOG_LEVEL=3` (1-4) | HIP runtime API logging |
+| `VLLM_ROCM_USE_AITER=1`, `SGLANG_USE_AITER=1` | AITER kernels in vLLM / SGLang |
+| `AMDGCN_ENABLE_DUMP=1`, `MLIR_ENABLE_DUMP=1`, `TRITON_CACHE_DIR` | Triton ISA/IR inspection |
+
+Version caveat: these names are current for ROCm 6.4-7.x and PyTorch 2.8+. vLLM's `VLLM_ROCM_*` flags in particular change between releases. Check `vllm/envs.py` for the version you deploy.
+
+## 47.7 Interview Questions
+
+**Q1.** "How can `torch.cuda.is_available()` be True on an AMD GPU?"
+
+**A.** PyTorch's ROCm build is produced by hipifying the CUDA sources at build time and compiling them with the ROCm toolchain. The Python and dispatcher layers deliberately keep the `cuda` names, so `torch.cuda`, `"cuda"` devices, streams, events, graphs, and the `"nccl"` backend are HIP- and RCCL-backed. Model code is unchanged. You tell the builds apart with `torch.version.hip`. Custom CUDA extensions are hipified too, but warp-32 assumptions and inline PTX must be fixed by hand.
+
+**Q2.** A GEMM-heavy training step is 30% slower on MI300X than expected from peak-FLOP ratios. What do you check, in order?
+
+**A.**
+1. Profile and confirm GEMMs dominate. Check which library ran: Tensile `Cijk_*` kernels from hipBLASLt vs rocBLAS, or Triton kernels from Inductor.
+2. Check dtypes: an FP32 matmul without TF32 runs at a fraction of BF16 throughput.
+3. Run TunableOp on the real shapes, and try `TORCH_BLAS_PREFER_HIPBLASLT=1`.
+4. Check shape alignment: dimensions that are not multiples of 64/128 cause padding or slow paths.
+5. Check SDPA: confirm it hit AOTriton or CK flash attention rather than the math fallback, which materializes s².
+6. Check Triton/Inductor kernels for NVIDIA-tuned configs (enable max-autotune, which includes the AMD knobs).
+7. For multi-GPU, check RCCL settings and comm/compute overlap, and remember that RCCL kernels occupy CUs.
+8. Rule out clocks or power capping (`amd-smi metric`).
+9. Then go per kernel: rocprof-compute roofline and counters on the top kernel.
+
+**Q3.** A Triton kernel autotuned on H100 is slow on MI300X. Why, and what do you change?
+
+**A.** Its configs encode NVIDIA assumptions:
+- `num_warps` means twice as many threads on AMD (wave64), which raises register pressure per workgroup.
+- `num_stages=3-4` assumes cp.async/TMA and up to ~228 KB of shared memory, while MI300X has 64 KB LDS per CU and AMD recommends `num_stages=2` for GEMMs.
+- Tile shapes should match MFMA shapes (`matrix_instr_nonkdim=16`).
+- `waves_per_eu` should be tuned to balance occupancy against spills.
+
+Add AMD-specific configs gated on `is_hip()`. Check ISA for VGPR count and scratch spills with `AMDGCN_ENABLE_DUMP=1`, and re-autotune on the target.
+
+**Q4.** Why does AITER exist if hipBLASLt, MIOpen, and CK already exist?
+
+**A.** LLM serving is dominated by a handful of fused, shape-specific ops: paged/MLA decode attention, fused MoE with block-scaled FP8, fused RMSNorm+quant, and small-message all-reduce. General libraries don't cover these or are not optimal for them. AITER is a curated, Python-callable collection of the fastest available implementation per op (CK, Triton, or hand-tuned assembly), wired into vLLM and SGLang behind flags. It is the AMD analog of FlashInfer plus the custom kernels inside NVIDIA-tuned serving stacks.
+
+**Q5.** You deploy Llama-70B on an 8×MI300X node. TP=8 or 8×TP=1?
+
+**A.** Weights are ~140 GB in BF16, so TP=1 fits but leaves only ~30 GB for KV cache (~90K tokens at 0.33 MB/token). 8×TP=1 maximizes aggregate throughput (no all-reduce, independent schedulers) but limits per-replica concurrency and context length. TP=8 gives each request 8× the HBM bandwidth (lower TPOT) and ~1.2 TB of KV space in one instance (≈3.8M tokens at 0.33 MB/token): about 40× a single TP=1 replica and about 5× the combined KV space of eight replicas, because the 140 GB of weights is stored once instead of 8 times. The cost is 2 all-reduces per layer. A middle ground such as 4×TP=2 or 2×TP=4 is often the throughput-under-SLO optimum. Measure goodput (requests/s meeting TTFT/TPOT targets) for the real traffic mix. FP8 weights (~70 GB) shift the answer toward more, smaller replicas.
+
+---
+
+# 48. Debugging a Slow Training Step
+
+---
+
+"Your training job got 2× slower" or "GPU utilization is 40%, fix it" is a very common ML-infra interview prompt. A strong answer is a **method**: measure, classify the bottleneck, test the hypothesis with a cheap experiment, fix, and re-measure. See also [Performance Engineering](../computer-science/Performance_Engineering.md#3-roofline-model) for roofline thinking, [Timing GPUs](../computer-science/Performance_Engineering.md#87-timing-gpus), and [Debugging and Profiling Tools](../tools/Debugging_and_Profiling_Tools.md).
+
+## 48.1 Step-Time Anatomy and MFU
+
+```text
+step time = data wait + H2D copy + forward + backward + exposed communication
+          + optimizer + host-device sync stalls + logging/checkpoint I/O
+```
+
+Start from **throughput (tokens/s or samples/s)** and **MFU**, not "GPU utilization". `amd-smi`/`nvidia-smi` utilization only reports that *some* kernel was running during the sample window. A single tiny kernel at a time shows 100%.
+
+```text
+MFU = (model FLOPs per step / step time) / (num_GPUs × peak FLOP/s)
+dense transformer training: model FLOPs ≈ 6 × N_params × tokens  (+ attention term 12·L·h·s per token)
+
+Example: 8B model, 8 × MI300X (peak dense BF16 ≈ 1307 TFLOP/s each), 80K tokens/s total
+  6 × 8e9 × 80,000 = 3.84e15 FLOP/s  /  (8 × 1.307e15)  =  37% MFU
+Healthy large-scale dense training is typically ~35-55% MFU; under ~25% means something is wrong.
+```
+
+## 48.2 Classify the Regime
+
+| Regime | Trace signature | Quick confirming experiment | Typical fixes |
+|---|---|---|---|
+| **Input-bound** (dataloader starvation) | GPU idle at the start of each step; long `enumerate(DataLoader)#_next_data` on CPU | Replace the loader with one cached batch reused forever. If step time drops, it was data | More `num_workers`, `pin_memory`, prefetch, move augmentation to GPU, pre-tokenize, faster storage |
+| **CPU launch-bound** | GPU stream full of short kernels with gaps between them; Python thread at 100% | Double the batch size. If step time barely changes, it was launch-bound | `torch.compile` (fusion), CUDA/HIP graphs (`reduce-overhead`), bigger batch, fused optimizers (`foreach`/`fused=True`) |
+| **GPU compute-bound** | Back-to-back kernels, GEMM/attention dominate | Per-kernel achieved TFLOP/s vs peak | Better kernels (TunableOp, flash attention), FP8, avoid FP32 matmuls |
+| **GPU memory-bound** | Elementwise, norm, and softmax kernels take a large share | Roofline of the top kernels | Fusion (`torch.compile`), fused norms and optimizers, fewer dtype casts |
+| **Communication-bound** | Long RCCL/NCCL kernels not overlapped with compute; scaling efficiency falls with node count | Compare 1 GPU vs 8 vs 64 at fixed per-GPU batch | Bucket tuning, overlap, gradient accumulation (`no_sync`), HSDP, check topology and NIC binding |
+| **Sync-bound** | `hipStreamSynchronize`/`cudaStreamSynchronize` or `aten::_local_scalar_dense` on the CPU row, GPU idle right after | `torch.cuda.set_sync_debug_mode("warn")` | Remove `.item()`/`print`/`.cpu()` from the hot loop; log every N steps |
+| **Straggler** (multi-node) | All ranks wait in the same all-reduce; one rank's compute is longer | Per-rank step-time histogram | Find the bad node: clocks or thermals, ECC errors, slow NIC, noisy CPU neighbor |
+
+## 48.3 Dataloader Starvation
+
+| Knob | What it does | Guidance |
+|---|---|---|
+| `num_workers` | Worker *processes* producing batches in parallel | Start at the number of CPU cores per GPU (e.g. 8-12), then measure. Too many costs RAM (each worker holds a copy of the dataset object) and causes contention |
+| `pin_memory=True` | Batches land in page-locked host memory | Enables truly async H2D copies with `.to(dev, non_blocking=True)`. Pageable copies are staged and synchronous with respect to the host |
+| `prefetch_factor` | Batches each worker prepares ahead (default 2) | Raise it to absorb jitter in per-batch cost; memory grows with `workers × prefetch` |
+| `persistent_workers=True` | Keep workers alive across epochs | Avoids re-forking and re-initializing (opening files, tokenizers) every epoch |
+| Placement | Data decode on CPU vs GPU | Heavy image or video decode belongs on the GPU (DALI, torchvision GPU decode). Text should be pre-tokenized offline |
+
+```python
+# data_wait.py -- measure how much of each step is spent waiting for the DataLoader
+import time
+import torch
+from torch.utils.data import DataLoader, Dataset
+
+class SlowDecode(Dataset):
+    """Simulates CPU-heavy decode/augmentation: ~2 ms per sample."""
+    def __len__(self):
+        return 2048
+    def __getitem__(self, i):
+        time.sleep(0.002)
+        return torch.randn(3, 64, 64), i % 10
+
+def run(num_workers: int, device: str) -> None:
+    loader = DataLoader(SlowDecode(), batch_size=32, num_workers=num_workers,
+                        pin_memory=(device == "cuda"), persistent_workers=num_workers > 0,
+                        prefetch_factor=4 if num_workers > 0 else None)
+    model = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(3 * 64 * 64, 10)).to(device)
+    opt = torch.optim.SGD(model.parameters(), lr=0.01)
+    wait = compute = 0.0
+    t0 = time.perf_counter()
+    for x, y in loader:
+        t1 = time.perf_counter()
+        wait += t1 - t0                                    # time blocked in next(loader)
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+        loss = torch.nn.functional.cross_entropy(model(x), y)
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+        if device == "cuda":
+            torch.cuda.synchronize()                       # demo only: make compute time honest
+        t0 = time.perf_counter()
+        compute += t0 - t1
+    total = wait + compute
+    print(f"num_workers={num_workers}: total {total:5.2f}s, waiting for data {100 * wait / total:4.1f}%")
+
+if __name__ == "__main__":                                 # guard required for worker processes
+    dev = "cuda" if torch.cuda.is_available() else "cpu"   # "cuda" is also the ROCm device string
+    for w in (0, 4, 8):
+        run(w, dev)
+```
+
+On a CPU-only machine this prints roughly 4.4 s / 1.7 s / 0.6 s total, with the data-wait share still above 90% at 8 workers. The arithmetic explains it: one batch costs 32 × 2 ms = 64 ms of CPU, so keeping up with a step of S ms needs at least `64 / S` workers. When compute per step is tiny, no reasonable worker count keeps up, and the decode itself has to get cheaper. Run the same arithmetic in an interview: per-sample CPU cost × batch ÷ step time = workers needed.
+
+## 48.4 Host-Device Sync Points
+
+PyTorch GPU ops are asynchronous: the CPU enqueues kernels and runs ahead. Anything that needs a GPU *value* on the CPU blocks until the queue drains. That empties the pipeline, and the GPU then idles while Python launches the next kernels.
+
+| Hidden sync | Why it syncs | Alternative |
+|---|---|---|
+| `loss.item()`, `float(t)`, `t.tolist()`, `print(t)` | Copies a value to the host | Accumulate on device (`running += loss.detach()`), read every N steps |
+| `if (t > 0).any():` and Python control flow on tensors | Needs the boolean on the host | `torch.where`, masking, `torch.cond` |
+| `x[mask]`, `torch.nonzero`, `torch.unique`, `torch.masked_select` | Output **shape** depends on data | Fixed-shape formulations (`torch.where`, padding, `torch.nonzero_static` where available) |
+| `.cpu()`, `.to("cpu")`, `.numpy()` | D2H copy | `non_blocking=True` into pinned memory, then sync once |
+| `torch.cuda.synchronize()`, `torch.cuda.empty_cache()` in the loop | Explicit or implicit sync | Remove from the hot path |
+| Gradient clipping that checks for `inf` in Python, some `GradScaler` paths | Reads the found-inf flag | Use the fused or foreach implementations, which keep the flag on device |
+
+Detection: `torch.cuda.set_sync_debug_mode("warn")` (or `"error"`) reports every synchronizing call with a stack trace. In a trace, look for long `hipStreamSynchronize`/`cudaStreamSynchronize`/`hipMemcpyWithStream` calls on the CPU row followed by a GPU gap.
+
+## 48.5 Reading a `torch.profiler` Trace
+
+```python
+# fragment -- profile a few steady-state steps with named regions
+from torch.profiler import profile, record_function, schedule, ProfilerActivity
+
+def trace_handler(p):
+    p.export_chrome_trace(f"trace_rank{rank}_step{p.step_num}.json")   # open in https://ui.perfetto.dev
+    print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=15))
+
+with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],  # CUDA activity = HIP on ROCm
+             schedule=schedule(skip_first=10, wait=1, warmup=2, active=3, repeat=1),
+             on_trace_ready=trace_handler, record_shapes=True, with_stack=False) as prof:
+    for step, batch in enumerate(loader):
+        with record_function("## data_to_device ##"):
+            batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+        with record_function("## forward ##"):
+            loss = model(**batch).loss
+        with record_function("## backward ##"):
+            loss.backward()
+        with record_function("## optimizer ##"):
+            optimizer.step(); optimizer.zero_grad(set_to_none=True)
+        prof.step()                                    # advances the schedule
+```
+
+- **Schedule:** `skip_first` skips compile and warmup steps, `wait` steps are ignored, `warmup` steps are traced but discarded (profiler startup overhead), and `active` steps are recorded. Profile steady state only, a few steps, and only on rank 0 plus one suspicious rank. Traces get large fast. `with_stack=True` and `profile_memory=True` add significant overhead.
+- **Reading it in Perfetto:**
+  1. Find the step boundaries (`ProfilerStep#N`).
+  2. On the **GPU stream rows**, look for gaps. Idle GPU time is the money.
+  3. Click a kernel to follow the **flow arrow** back to the CPU op that launched it. If kernels start right after their launch, the GPU is starving: launch-bound or sync-bound. If launches run far ahead of execution, the GPU is the bottleneck, which is good.
+  4. On the communication stream, check whether RCCL kernels overlap compute kernels.
+  5. Use your `record_function` ranges to attribute time to phases.
+- **Distributed:** Holistic Trace Analysis (HTA, `pip install HolisticTraceAnalysis`) reads per-rank traces and reports idle, compute, and communication breakdowns and the comm/compute overlap percentage per rank.
+
+## 48.6 Overlapping Communication with Compute
+
+- **DDP** buckets gradients (`bucket_cap_mb`, default 25) and launches each bucket's all-reduce as soon as its gradients are ready, overlapping with the rest of backward. The *last* bucket (first layers) cannot overlap. Exposed comm ≈ last bucket + any slow collective. Tune `bucket_cap_mb`: bigger buckets mean fewer, more efficient collectives but less overlap. `gradient_as_bucket_view=True` saves a copy.
+- **Gradient accumulation:** wrap the non-final micro-steps in `model.no_sync()` (DDP) or the FSDP equivalent, so you all-reduce once per optimizer step instead of once per micro-batch.
+- **FSDP/ZeRO-3:** overlap is all about *prefetching* the next unit's all-gather (FSDP1 `backward_prefetch=BACKWARD_PRE`, `forward_prefetch=True`; FSDP2 prefetches by default). Unit granularity matters: one unit per transformer block is the norm.
+- **Comm kernels use CUs.** On AMD (and NVIDIA) collective kernels run on compute units. Overlapped compute kernels slow down a little, and more RCCL channels (`NCCL_MIN_NCHANNELS`) means faster comm but more CUs taken from compute. Measure end-to-end.
+- **Cost check:** ring all-reduce time ≈ `2(N-1)/N × bytes / busbw`. Measure `busbw` with `rccl-tests` (`all_reduce_perf`) on the same nodes, and compare with what the trace shows. If the trace is much slower, suspect topology (NIC-GPU NUMA affinity), the wrong transport, or contention. See [Collective Communication](../ml-gpu/Parallel_GPU_Programming.md#3-collective-communication).
+
+## 48.7 Going Below PyTorch: rocprofv3, rocprof-sys, rocprof-compute
+
+`torch.profiler` (Kineto) gives framework ops, kernels, and correlation, but no hardware counters and limited host-side visibility. The ROCm tools fill in the rest:
+
+| Question | Tool | Example |
+|---|---|---|
+| Which kernels, API calls, and copies, and for how long? | `rocprofv3` (rocprofiler-sdk) | `rocprofv3 --runtime-trace --stats --output-format pftrace -d ./prof -- python train.py --steps 20` |
+| Only some kernels / my phase markers | `rocprofv3` filters and markers | `--kernel-include-regex 'Cijk_.*'`; `--marker-trace` for ROCTx ranges |
+| Whole-system timeline: Python stacks, CPU threads, sampling, GPU activity, RCCL in one Perfetto view | `rocprof-sys` (ROCm Systems Profiler) | `rocprof-sys-python -- train.py` |
+| Why is *this kernel* slow (roofline, occupancy, cache hit rates, LDS bank conflicts)? | `rocprof-compute` (ROCm Compute Profiler) | `rocprof-compute profile -n step -k <kernel_name> -- python train.py`, then `rocprof-compute analyze -p workloads/step/<gpu>` |
+
+**Correlating across tools:**
+1. Use **the same few steady-state steps**: gate them with an environment flag or step range in your script, because the overhead of these tools is significant.
+2. **Kernel names** are the join key between the torch.profiler trace and rocprofv3 output. GEMMs show up as Tensile `Cijk_*`, Triton kernels as `triton_*` names from Inductor.
+3. **ROCTx ranges** let you see phases in rocprofv3 and rocprof-sys timelines: emit them around forward, backward, and optimizer. On ROCm builds, `torch.cuda.nvtx.range_push/pop` is backed by ROCTx. Verify with a one-line test that the ranges appear under `--marker-trace` for your PyTorch/ROCm pairing, since the backing library has changed across releases.
+4. Avoid stacking profilers (torch.profiler and rocprofv3 in the same run): both subscribe to the same runtime callbacks, which adds overhead and can drop records.
+
+The workflow is: torch.profiler finds the slow *phase*, rocprofv3 or rocprof-sys show *what the GPU and host were doing*, and rocprof-compute explains *why a specific kernel* is slow. See [Project Deep Dive: rocprof-compute](../career/Project_Deep_Dive_rocprof-compute.md) and [AMD GPU Architecture and Profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md).
+
+## 48.8 Hangs and Stragglers at Scale
+
+- **Straggler:** every rank's all-reduce time is long except one rank's, because everyone else is waiting for it. Log per-rank step and compute time, and compare. Typical causes are a throttled GPU (check clocks and temperature with `amd-smi`), a degraded link, ECC page retirement, or a CPU-side issue (another process, wrong NUMA binding).
+- **Hang:** a collective mismatch (one rank skipped a collective, or ranks issued them in a different order). Tools:
+  - `NCCL_DEBUG=INFO` (RCCL honors it).
+  - The process-group timeout (`init_process_group(timeout=...)`).
+  - PyTorch's NCCL **Flight Recorder**: `TORCH_NCCL_TRACE_BUFFER_SIZE=N` (records the last N collectives per rank) plus `TORCH_NCCL_DUMP_ON_TIMEOUT=1` (writes one file per rank on timeout, prefix set by `TORCH_FR_DUMP_TEMP_FILE`, default `/tmp/nccl_trace_rank_`). Diff the dumps across ranks (e.g. with `torchfrtrace`) to find the odd one out.
+  - `py-spy dump --pid` on every rank to see Python stacks.
+
+## 48.9 Interview Questions
+
+**Q1.** "Our training job went from 1.0 s/step to 2.0 s/step after last week's changes. Walk me through debugging it."
+
+**A.**
+1. **Reproduce and bound it.** Is it every step or periodic? All ranks or one? Diff the changes (code, data, container or ROCm version, cluster). Periodic slowness points at checkpointing, eval, or GC. One rank points at a straggler.
+2. **Measure the phases.** Capture a torch.profiler trace of 3 steady-state steps, before and after if possible, with `record_function` ranges.
+3. **Classify:**
+   - A GPU gap at step start means data.
+   - Short kernels with gaps mean launch-bound, often a new graph break or `torch.compile` falling back to eager after recompiles.
+   - Long sync calls mean a newly added `.item()` or `print`.
+   - Longer comm kernels mean communication: a topology change, a NIC down, or a changed bucket size.
+   - Longer GEMMs mean a library or kernel-selection change (new ROCm, TunableOp table invalidated, dtype silently FP32).
+4. **Confirm with a cheap experiment:** synthetic data, 1-node vs multi-node, `TORCH_LOGS=recompiles`, `set_sync_debug_mode`.
+5. **Fix, re-measure, and add a regression guard,** such as a step-time and MFU check in CI on a small config.
+
+**Q2.** GPU utilization reads 100% but MFU is 15%. How is that possible?
+
+**A.** Utilization counts time with *any* kernel resident, not how much of the GPU it uses. Low MFU with "100% utilization" means the time goes to kernels far from peak:
+- Memory-bound elementwise or norm kernels.
+- Small GEMMs that can't fill 304 CUs.
+- FP32 instead of BF16.
+- Unfused attention.
+- Comm kernels counted as busy.
+- Recompute (HFU > MFU).
+
+Fixes come from the per-kernel time breakdown: fuse (compile), use bigger tiles or batches, use flash attention, and check dtypes. Then use rocprof-compute on the top kernels to see achieved vs peak.
+
+**Q3.** Why is `print(f"loss={loss.item()}")` every step a problem, and how do you log without it?
+
+**A.** `.item()` forces a device-to-host copy, which waits for every queued kernel (the whole forward and backward) to finish. The CPU can no longer run ahead to enqueue the next step, so the GPU idles during Python's launch overhead at the start of every step. That is a few percent to tens of percent of throughput for small models. Instead, accumulate `loss.detach()` into a device tensor and call `.item()` every N steps, or copy to pinned memory with `non_blocking=True` and read it a step later.
+
+**Q4.** How do you tell whether a job is communication-bound, and what are your levers?
+
+**A.** In the trace, measure *exposed* comm time: collective kernels that don't overlap compute. Compare step time at 1, 8, and 64 GPUs with a fixed per-GPU batch. Weak-scaling efficiency below ~90% across nodes, with the extra time in collectives, indicates comm-bound. Then validate bandwidth with rccl-tests against the alpha-beta estimate `2(N-1)/N × bytes / busbw`. Levers:
+- Overlap (buckets, prefetch).
+- Fewer bytes: BF16 gradient reduction, ZeRO-1/2 instead of 3, gradient accumulation with `no_sync`.
+- Topology-aware parallelism: TP inside a node only, HSDP, EP intra-node.
+- Fabric fixes: NIC/GPU affinity, RCCL channels.
+- Larger per-GPU batch to raise the compute-to-communication ratio.
+
+**Q5.** Compute the MFU: 70B dense model, 512 GPUs at 1300 TFLOP/s peak BF16, global batch of 4M tokens per step, 25 s per step.
+
+**A.** Model FLOPs per step ≈ 6 × 70e9 × 4e6 = 1.68e18. Achieved = 1.68e18 / 25 s = 6.72e16 FLOP/s. Peak = 512 × 1.3e15 = 6.656e17 FLOP/s. MFU ≈ **10.1%**, which is poor. Expect 35-50%. Suspects: excessive recompute (check HFU), exposed PP bubbles or communication, small micro-batches, or data starvation. Next step: profile one rank's step and apply the 48.2 classification.

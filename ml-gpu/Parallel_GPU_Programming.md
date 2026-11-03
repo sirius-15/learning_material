@@ -1,6 +1,10 @@
 # Parallel and GPU Programming -- Comprehensive Reference
 
+> Last reviewed: 2026-11 · Versions assumed: ROCm 6.4-7.x, CUDA 12.x, CMake 3.21-4.2, Open MPI 5.0
+
 > A deep-dive reference covering MPI, OpenMP, CUDA, and HIP programming for high-performance computing. Each section includes conceptual explanations, comparison tables, code examples, and common interview questions with detailed answers. Complements the *C++ Fundamentals*, *CS Fundamentals*, *DSA Fundamentals*, and *LeetCode Patterns* guides.
+
+> **Related guides:** scaling laws, roofline, and Little's law worked math live in [Performance Engineering](../computer-science/Performance_Engineering.md) ([Amdahl/Gustafson](../computer-science/Performance_Engineering.md#2-amdahls-and-gustafsons-laws), [roofline](../computer-science/Performance_Engineering.md#3-roofline-model)). AMD hardware counters and the rocprof-compute workflow are in [AMD GPU Architecture and Profiling](AMD_GPU_Architecture_and_Profiling.md). Step-by-step kernel optimizations (reduction, transpose, GEMM, scan) are in [GPU Kernel Case Studies](GPU_Kernel_Case_Studies.md). Building HIP with CMake is in [CMake Fundamentals -- HIP and ROCm with CMake](../tools/CMake_Fundamentals.md#64-hip-and-rocm-with-cmake), and combining it with MPI and OpenMP in one CMake build is in [32.6](#326-building-hybrid-mpi--openmp--hip-code-with-cmake).
 
 ---
 
@@ -53,6 +57,12 @@
 
 32. [Hybrid Programming Patterns](#32-hybrid-programming-patterns)
 33. [Comprehensive Comparison Tables](#33-comprehensive-comparison-tables)
+
+### Part 6: Multi-GPU Communication and Portability
+
+34. [Collective Communication Algorithms and Cost Model](#34-collective-communication-algorithms-and-cost-model)
+35. [Multi-GPU Programming Beyond Peer Copies (HIP)](#35-multi-gpu-programming-beyond-peer-copies-hip)
+36. [Portable Programming Models and AMD Wave-Level Primitives](#36-portable-programming-models-and-amd-wave-level-primitives)
 
 ---
 
@@ -176,6 +186,8 @@ mpirun -np 16 --hostfile hosts.txt ./my_program
 ```
 
 `mpicc`, `mpicxx`, and `mpifort` are wrapper scripts that add the correct include paths and link against the MPI library. They delegate to the underlying compiler (e.g., `gcc`, `g++`, `gfortran`).
+
+> **See also:** in a CMake project, do not make `mpicxx` the compiler. Use `find_package(MPI REQUIRED COMPONENTS CXX)` and link `MPI::MPI_CXX`, as shown in [32.6 Building Hybrid MPI + OpenMP + HIP Code with CMake](#326-building-hybrid-mpi--openmp--hip-code-with-cmake). How Find modules work is covered in [CMake Fundamentals -- find_package](../tools/CMake_Fundamentals.md#28-find_package-module-mode-vs-config-mode).
 
 ## 1.5 MPI Program Structure Pattern
 
@@ -698,6 +710,8 @@ MPI_Wait(&req, MPI_STATUS_IGNORE);
 | `MPI_Scan` | No | Prefix reduction | Process i gets reduction of 0..i |
 | `MPI_Alltoall` | No | All → All (transpose) | All processes |
 | `MPI_Barrier` | No | Synchronization only | N/A |
+
+> **See also:** [Collective Communication Algorithms and Cost Model](#34-collective-communication-algorithms-and-cost-model) for how these collectives are implemented (ring, tree, recursive doubling), the alpha-beta cost derivations, and the GPU collective libraries (NCCL/RCCL).
 
 ---
 
@@ -1364,6 +1378,8 @@ icx -fiopenmp -o program program.c
 # MSVC
 cl /openmp program.c
 ```
+
+> **See also:** in CMake, use `find_package(OpenMP REQUIRED COMPONENTS CXX)` and `target_link_libraries(app PRIVATE OpenMP::OpenMP_CXX)`. The flag is applied only to CXX sources, so OpenMP pragmas in `.hip` files are silently ignored. See [32.6](#326-building-hybrid-mpi--openmp--hip-code-with-cmake).
 
 ## 9.3 Controlling Thread Count
 
@@ -2605,6 +2621,8 @@ int main() {
 }
 ```
 
+> **See also:** building `.cu` files with CMake's CUDA language (`CMAKE_CUDA_ARCHITECTURES`, `CUDA::cudart`), and the matching HIP setup, are compared side by side in [CMake Fundamentals -- CUDA vs HIP in CMake](../tools/CMake_Fundamentals.md#646-cuda-vs-hip-in-cmake).
+
 ## 18.5 Matrix Multiplication
 
 ```cpp
@@ -3265,11 +3283,15 @@ Benefits of CUDA Graphs:
 - Driver can optimize the execution plan across the entire graph
 - Ideal for iterative workloads where the same sequence repeats
 
+> **See also:** [HIP graphs: stream capture semantics and pitfalls](#353-hip-graphs-stream-capture-semantics-and-pitfalls) (fork/join capture, illegal calls during capture, baked-in parameters, graph update).
+
 ---
 
 # 23. Performance Optimization
 
 ---
+
+> **See also:** the quantitative side of this section lives elsewhere: [Amdahl's and Gustafson's laws](../computer-science/Performance_Engineering.md#2-amdahls-and-gustafsons-laws), the [roofline model with MI300X ridge-point math](../computer-science/Performance_Engineering.md#3-roofline-model), and [Little's law / bytes in flight](../computer-science/Performance_Engineering.md#42-memory-level-parallelism-bytes-in-flight) for how much occupancy or ILP is enough. For full profile -> diagnose -> fix -> re-profile walkthroughs (reduction ladder, tiled GEMM, transpose, scan), see [GPU Kernel Case Studies](GPU_Kernel_Case_Studies.md).
 
 ## 23.1 Occupancy
 
@@ -3393,6 +3415,16 @@ for (int i = 0; i < N; i++) {
 | CUDA Occupancy Calculator | Spreadsheet for occupancy analysis |
 | `cuda-memcheck` / `compute-sanitizer` | Memory error detection |
 
+Typical CUDA commands (Nsight Systems is `nsys`, Nsight Compute is `ncu`):
+
+```bash
+nsys profile -o timeline --trace=cuda,nvtx,osrt ./app     # timeline (.nsys-rep), open in the Nsight Systems GUI
+ncu --set full -k regex:gemm -c 1 -o gemm_report ./app      # one dispatch of kernels matching "gemm", all sections
+compute-sanitizer --tool racecheck ./app                    # shared-memory race detection (also memcheck, initcheck, synccheck)
+```
+
+> The AMD equivalents are `rocprofv3` (tracing and counters), `rocprof-sys` (timeline, like Nsight Systems), and `rocprof-compute` (kernel analysis, like Nsight Compute). See [30.5 ROCm Profiling Tools](#305-rocm-profiling-tools) and [AMD GPU Architecture and Profiling](AMD_GPU_Architecture_and_Profiling.md).
+
 ---
 
 # 24. Advanced CUDA
@@ -3471,6 +3503,8 @@ cudaMemcpyPeerAsync(d_data[1], 1, d_data[0], 0, bytes, stream);
     cudaFree(d_local);
 }
 ```
+
+> **See also:** peer copies are only the first step. For collectives (NCCL/RCCL allreduce and its cost model) see [section 34](#34-collective-communication-algorithms-and-cost-model). For IPC handles, graphs, stream-ordered allocation, stream priorities, and GPU sharing (MPS/MIG and AMD partitions) see [section 35](#35-multi-gpu-programming-beyond-peer-copies-hip). The HIP APIs mirror the CUDA ones.
 
 ## 24.3 CUDA-Aware MPI
 
@@ -3703,7 +3737,7 @@ Key ROCm components:
 - **rocBLAS, rocFFT, rocSOLVER**: Math libraries (CUDA library equivalents)
 - **MIOpen**: Deep learning primitives (cuDNN equivalent)
 - **RCCL**: Multi-GPU collectives (NCCL equivalent)
-- **rocprof, Omniperf, Omnitrace**: Profiling tools
+- **ROCprofiler-SDK** (`rocprofv3`), **ROCm Compute Profiler** (`rocprof-compute`, formerly Omniperf), **ROCm Systems Profiler** (`rocprof-sys`, formerly Omnitrace): profiling tools. The legacy `rocprof`/`rocprofv2` and the ROCProfiler v1/ROCTracer libraries are deprecated. See [30.5](#305-rocm-profiling-tools).
 
 ## 25.5 Compilation
 
@@ -3721,6 +3755,8 @@ hipcc --platform nvidia -o program program.cpp
 # Check platform
 hipconfig --platform   # prints "amd" or "nvidia"
 ```
+
+> **See also:** for real projects use CMake's first-class HIP language (`enable_language(HIP)`, `CMAKE_HIP_ARCHITECTURES`, `hip::host` / `hip::device`) rather than wrapping `hipcc`: [CMake Fundamentals -- HIP and ROCm with CMake](../tools/CMake_Fundamentals.md#64-hip-and-rocm-with-cmake).
 
 ---
 
@@ -3813,6 +3849,8 @@ int main() {
     return 0;
 }
 ```
+
+> **See also:** the same vector add as a multi-file CMake project, with the kernel in a `.hip` file compiled by ROCm clang and host-only code compiled by `g++` against `hip::host`, is in [CMake Fundamentals -- The HIP Language: A Complete Project](../tools/CMake_Fundamentals.md#642-the-hip-language-a-complete-project).
 
 ## 26.4 Device Properties
 
@@ -3980,6 +4018,8 @@ int val = __shfl_xor(source_val, lane_mask);       // butterfly
 // On NVIDIA backend, these map to the _sync variants with full mask
 ```
 
+> **See also:** [36.6 AMD cross-lane operations](#366-amd-cross-lane-operations-dpp-ds_swizzle-ds_bpermute-readlane) for the cross-lane mechanisms (DPP, `ds_swizzle`, `ds_bpermute`, `v_readlane`); `__shfl*` itself always compiles to `ds_bpermute_b32`, and [36.7](#367-porting-warp32-code-to-wave64-ballot-masks-and-other-traps) for the 64-bit ballot-mask traps. As of ROCm 7.0, the `_sync` variants (with 64-bit masks) are enabled by default and `warpSize` is no longer `constexpr`.
+
 ### Handling Wavefront Size Differences
 
 ```cpp
@@ -3994,12 +4034,10 @@ __device__ float wavefront_reduce_sum(float val) {
     return val;
 }
 
-// Compile-time check
-#ifdef __HIP_PLATFORM_AMD__
-    #define WARP_SIZE 64
-#else
-    #define WARP_SIZE 32
-#endif
+// Do NOT derive the wave size from __HIP_PLATFORM_AMD__: RDNA (gfx10+) is wave32,
+// and since ROCm 7.0 warpSize is no longer constexpr. Use the runtime warpSize in
+// device code, or rocprim::arch::wavefront::min_size()/max_size() for compile-time
+// bounds (see 36.7).
 ```
 
 ## 28.4 Atomic Operations
@@ -4061,6 +4099,8 @@ hipify-perl --print-stats cuda_source.cu
 - Some advanced CUDA features without direct HIP equivalents
 - Performance optimizations specific to NVIDIA hardware
 
+> **See also:** hipify converts the source, but the build must be ported too. In CMake, keep the hipified files named `.cu` and mark them `LANGUAGE HIP` ([Compiling `.cpp` or `.cu` Files as HIP](../tools/CMake_Fundamentals.md#643-compiling-cpp-or-cu-files-as-hip)). Then swap `CUDA` for `HIP` in `project()` and the `*_ARCHITECTURES` variables, and replace `CUDA::cublas` and similar targets with `roc::rocblas` and the other ROCm targets ([CUDA vs HIP in CMake](../tools/CMake_Fundamentals.md#646-cuda-vs-hip-in-cmake)). Relocatable device code needs `-fgpu-rdc`, because HIP has no `CUDA_SEPARABLE_COMPILATION` property.
+
 ## 29.2 Platform-Specific Code
 
 ```cpp
@@ -4085,9 +4125,9 @@ hipify-perl --print-stats cuda_source.cu
 |---|---|---|---|
 | Warp size | Always 32 | 64 on CDNA, 32 on RDNA | Use `warpSize` variable |
 | Shared memory | Up to 48 KB default | Up to 64 KB per CU | Check `hipDeviceProp_t` |
-| `__shfl_sync` mask | `0xFFFFFFFF` (32 bits) | 64-bit wavefront needs `0xFFFFFFFFFFFFFFFF` | Use HIP's mask-free shuffle |
+| `__shfl_sync` mask | `0xFFFFFFFF` (32 bits) | 64-bit wavefront needs `0xFFFFFFFFFFFFFFFF` | ROCm 7.0+: `__shfl_sync` etc. require a 64-bit mask (`0xffffffffffffffffull` or `__activemask()`). ROCm 6.2-6.4: opt in with `-DHIP_ENABLE_WARP_SYNC_BUILTINS`, or use the mask-free `__shfl*` |
 | Warp ballot | Returns `unsigned int` (32 bits) | Returns `unsigned long long` (64 bits) | Use appropriate type |
-| Register pressure | ~255 regs/thread | VGPRs differ per arch | Profile with `rocprof` |
+| Register pressure | ~255 regs/thread | VGPRs differ per arch | `-Rpass-analysis=kernel-resource-usage` at compile time; `rocprofv3 --kernel-trace` at run time |
 | Cooperative groups | Extensive API | Partial support | Check HIP documentation |
 | Dynamic parallelism | Supported | Limited support | Restructure if needed |
 | Inline PTX | NVIDIA ISA | Not portable | Use HIP intrinsics or inline GCN |
@@ -4115,6 +4155,8 @@ hipify-perl --print-stats cuda_source.cu
 
 // Alternatively, just write HIP -- hipcc compiles it for NVIDIA too
 ```
+
+> **See also:** one CMake build can target either vendor. Set `CMAKE_HIP_PLATFORM=amd|nvidia` (CMake 3.28+) with the HIP language, or keep separate `CUDA` and `HIP` language targets behind an option. See [CMake Fundamentals -- CUDA vs HIP in CMake](../tools/CMake_Fundamentals.md#646-cuda-vs-hip-in-cmake) and [Three Ways to Build HIP Code](../tools/CMake_Fundamentals.md#641-three-ways-to-build-hip-code).
 
 ---
 
@@ -4155,13 +4197,32 @@ Occupancy impact:
 ```
 
 ```bash
-# Check VGPR/SGPR usage with rocprof
-rocprof --stats kernel_app
-# Look for vgpr_count and sgpr_count in the output
+# Compile time: the compiler reports per-kernel resource usage and the
+# occupancy those resources allow (no GPU needed).
+hipcc -O3 --offload-arch=gfx942 -Rpass-analysis=kernel-resource-usage -c kernel.hip
+#   kernel.hip:18:0: Function Name: _Z9block_sumPKiPii
+#   kernel.hip:18:0:     TotalSGPRs: 16
+#   kernel.hip:18:0:     VGPRs: 14
+#   kernel.hip:18:0:     AGPRs: 0
+#   kernel.hip:18:0:     ScratchSize [bytes/lane]: 0        <- non-zero means register spills
+#   kernel.hip:18:0:     Occupancy [waves/SIMD]: 8
+#   kernel.hip:18:0:     LDS Size [bytes/block]: 4224
 
-# Or use --hsa-trace for detailed kernel info
-rocprof --hsa-trace ./my_app
+# Run time: rocprofv3's kernel trace records the resources of every dispatch.
+# ROCm 7.x: collect in the default rocpd (SQLite) format, then convert/summarize.
+rocprofv3 --kernel-trace -d prof -o run -- ./my_app          # -> prof/run_results.db
+rocpd convert -i prof/run_results.db -f csv -d prof_csv      # kernel trace CSV
+rocpd summary -i prof/run_results.db                         # per-kernel stats
+# ROCm 6.x / quick look (direct CSV is deprecated on 7.x):
+rocprofv3 --kernel-trace --stats --output-format csv -d prof -o run -- ./my_app
+#   The kernel-trace CSV has VGPR_Count, Accum_VGPR_Count (AGPRs), SGPR_Count,
+#   LDS_Block_Size, Scratch_Size per dispatch; the 6.x run_kernel_stats.csv has
+#   per-kernel call counts and total/avg/min/max durations.
 ```
+
+The run-time `VGPR_Count` can be larger than the compile-time `VGPRs` (16 vs 14 for the kernel above). The trace reports the *allocated* count, which is rounded up to the VGPR allocation granule. Occupancy is computed from the rounded value.
+
+> **Legacy note:** older material uses `rocprof --stats` / `rocprof --hsa-trace` (rocprof v1). Those flags still exist on older installs, but the tool is deprecated. Note that in `rocprofv3`, `--hip-trace` and `--hsa-trace` trace **only** the API calls. Kernel dispatches need `--kernel-trace` (or the aggregate `--runtime-trace` / `--sys-trace`), and `--stats` must be combined with a tracing option.
 
 ## 30.3 LDS (Local Data Share) Optimization
 
@@ -4201,44 +4262,120 @@ data[global_id * 2] = value;
 
 ## 30.5 ROCm Profiling Tools
 
-| Tool | Purpose | Usage |
-|---|---|---|
-| **rocprof** | Kernel profiling (counters, traces) | `rocprof --stats ./app` |
-| **Omniperf** | Comprehensive GPU profiling (roofline, memory, compute) | `omniperf profile -n name -- ./app` |
-| **Omnitrace** | System-wide tracing (CPU+GPU timeline) | `omnitrace-instrument -- ./app` |
-| **rocm-smi** | GPU monitoring (temp, utilization, clocks) | `rocm-smi --showuse` |
-| **roc-obj-ls** | List GPU objects in binary | `roc-obj-ls binary` |
+This section is a working summary of the commands. Counter meanings, derived metrics, the top-down speed-of-light method, and how a profiler intercepts dispatches without changing the application are covered in [AMD GPU Architecture and Profiling](AMD_GPU_Architecture_and_Profiling.md). How to build a custom rocprofiler-sdk tool library (`find_package(rocprofiler-sdk)`, the `rocprofiler_configure` entry point, hidden visibility) and how to link ROCTx markers is in [CMake Fundamentals -- Linking ROCm Libraries and Profiler SDKs](../tools/CMake_Fundamentals.md#645-linking-rocm-libraries-and-profiler-sdks).
 
-### Using rocprof
+### Tool Map (Current Names and Former Names)
 
-```bash
-# Basic kernel statistics (time, occupancy)
-rocprof --stats ./my_app
+| Tool (binary) | Formerly | Layer | Purpose | NVIDIA analogue |
+|---|---|---|---|---|
+| **ROCprofiler-SDK** (library) | ROCProfiler v1/v2 + ROCTracer | Library / tool API | Callback and buffered tracing, counter collection, PC sampling, thread trace. Every tool below is built on it | CUPTI |
+| **`rocprofv3`** | `rocprof` (v1), `rocprofv2` | CLI on the SDK | API/kernel/memory tracing, `--stats`, hardware counters (`--pmc`) | `nsys` CLI + `ncu --metrics` |
+| **`rocprof-sys`** (ROCm Systems Profiler) | Omnitrace (`omnitrace-*`) | Whole-application timeline | CPU sampling + instrumentation, HIP/HSA/RCCL/MPI/OpenMP, GPU activity, Perfetto output | Nsight Systems |
+| **`rocprof-compute`** (ROCm Compute Profiler) | Omniperf (`omniperf`) | Per-kernel deep dive | Speed-of-light panels, memory chart, roofline, instruction mix, occupancy limiters | Nsight Compute |
+| **`amd-smi`** | `rocm-smi` (still shipped) | Device management | Utilization, power, clocks, partitions, xGMI topology | `nvidia-smi` |
+| **`roc-obj-ls` / `roc-obj`** | -- | Binary inspection | List and extract code objects (`.hsaco`) embedded in a fat binary | `cuobjdump` |
 
-# Hardware counters
-echo "pmc: SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM" > counters.txt
-rocprof -i counters.txt ./my_app
+The renames took effect in **ROCm 6.3** (December 2024). The packages became `rocprofiler-compute` and `rocprofiler-systems`, and the binaries became `rocprof-compute` and `rocprof-sys-*`. `rocprofv3` with ROCprofiler-SDK became the recommended profiler in the ROCm 6.2-6.4 timeframe. ROCm 6.4 put the legacy `rocprof`, `rocprofv2`, ROCProfiler, and ROCTracer into critical-fixes-only mode, and they are scheduled for end of support. In **ROCm 7.0**, `rocprofv3`'s default output format became **rocpd** (a SQLite database), and `rocprof-compute` switched to `rocprofv3` as its default collection backend.
 
-# Application trace (timeline)
-rocprof --hip-trace ./my_app
-rocprof --hsa-trace ./my_app
-```
-
-### Using Omniperf
+### rocprofv3: Tracing and Counters
 
 ```bash
-# Profile
-omniperf profile -n my_profile -- ./my_app
+# Kernel timeline + per-kernel stats (the replacement for "rocprof --stats").
+# ROCm 7.x: collect in the default rocpd format (SQLite), then post-process.
+rocprofv3 --kernel-trace -d prof -o run -- ./my_app              # -> prof/run_results.db
+rocpd summary -i prof/run_results.db                             # per-kernel stats (--format csv|md|json|html)
+rocpd convert -i prof/run_results.db -f csv pftrace -d prof_out  # CSV tables + Perfetto trace
 
-# Analyze (launches web-based GUI)
-omniperf analyze -p workloads/my_profile/
+# ROCm 6.x / quick look: direct CSV (deprecated on 7.x, see the note below)
+rocprofv3 --kernel-trace --stats --output-format csv -d prof -o run -- ./my_app
+#   prof/run_kernel_trace.csv  prof/run_kernel_stats.csv
 
-# Key metrics to examine:
-# - Roofline analysis (compute vs memory bound)
-# - Memory chart (L1/L2/HBM utilization)
-# - Instruction mix (VALU, SALU, VMEM, LDS)
-# - Occupancy and limiting factors
+# Everything the HIP runtime does (HIP API, kernels, copies, markers, RCCL) as a Perfetto trace
+rocprofv3 --runtime-trace -- ./my_app        # default rocpd .db; rocpd convert -f pftrace -> ui.perfetto.dev
+rocprofv3 --sys-trace -- ./my_app            # adds HSA API tracing; default output is rocpd (.db)
+
+# Summary table printed at exit
+rocprofv3 --kernel-trace --memory-copy-trace -S -- ./my_app
+
+# Hardware counters. One --pmc group = one pass; several --pmc flags = several application replays
+rocprofv3 -L                                                     # list counters available on this GPU
+rocprofv3 --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE \
+          --kernel-include-regex "gemm" -- ./my_app
+#   -> rocpd .db; after rocpd convert -f csv (or --output-format csv on 6.x):
+#      *_counter_collection.csv, one row per (dispatch, counter)
+
+# Same thing from an input file (text, YAML or JSON)
+printf 'pmc: SQ_WAVES SQ_INSTS_VALU\npmc: TCC_HIT_sum TCC_MISS_sum\n' > counters.txt
+rocprofv3 -i counters.txt -- ./my_app
+
+# MPI: put the profiler inside the launcher; one output per rank
+mpirun -n 4 rocprofv3 --kernel-trace -- ./my_mpi_app      # one <host>/<pid>_results.db per rank
+
+# rocpd databases can be converted or queried after the run (several -i inputs are allowed)
+rocpd convert -i <host>/<pid>_results.db --output-format csv pftrace
+rocpd summary -i <host>/<pid>_results.db
 ```
+
+> **Output-format note (ROCm 7.x):** `rocprofv3 --help` and the ROCprofiler-SDK docs say that direct `csv`, `pftrace`, and `otf2` output is **deprecated**. Use the default `rocpd` output plus `rocpd convert`. Direct formats can omit data for some tracing features (for example hipFILE and rocSHMEM records). Because rocpd is the default from ROCm 7.0, `--stats` on its own no longer gives you the `*_stats.csv` files older guides show. Get per-kernel statistics from `rocpd summary`. `--output-format csv` is still the shortest path on ROCm 6.x installs.
+
+Things to know (interviewers ask about these):
+- **`--hip-trace` and `--hsa-trace` trace only API calls** in `rocprofv3`. Use `--kernel-trace` / `--memory-copy-trace`, or the aggregates `--runtime-trace` / `--sys-trace`, to see GPU activity. `--stats` needs at least one tracing option.
+- **Counter collection perturbs the run.** Dispatches are serialized so counters can be attributed to one kernel, and counter sets that do not fit in the hardware counter slots need multiple passes (application replay). That only works if the app is deterministic. Derived metrics computed across passes assume each pass did the same work.
+- **Filter early**, with `--kernel-include-regex` and `--kernel-iteration-range`, or with ROCTx regions plus `--selected-regions`. A full-application counter run on a training job is slow and produces huge files.
+- **Mark regions** with ROCTx (`roctxRangePush/Pop`, link `-lrocprofiler-sdk-roctx`) and trace them with `--marker-trace`. `--kernel-rename` renames kernels by their enclosing ROCTx range.
+
+### rocprof-sys: Whole-Application Timeline
+
+```bash
+rocprof-sys-avail --all                                   # list components/settings (ROCPROFSYS_* env vars)
+rocprof-sys-instrument -- ./my_app                        # runtime instrumentation (like gdb --args)
+rocprof-sys-instrument -o my_app.inst -- ./my_app         # binary rewrite once...
+rocprof-sys-run -- ./my_app.inst                          # ...then run the rewritten binary
+rocprof-sys-sample -- ./my_app                            # statistical sampling only, lowest overhead
+# Output: Perfetto .proto trace (CPU call stacks, threads, HIP/HSA/RCCL/MPI, GPU kernels) + text/JSON profiles
+```
+
+Use it first when the question is "where does wall-clock time go?". Typical findings are GPU idle gaps between kernels, host-side launch overhead, synchronous copies, MPI/RCCL waits, and data-loader stalls. It is the right tool for those, and `rocprof-compute` is not.
+
+### rocprof-compute: Kernel-Level Analysis
+
+```bash
+# Profile: replays the app for counter passes, then runs roofline microbenchmarks
+rocprof-compute profile --name my_app -- ./my_app --size 4096
+rocprof-compute profile --name my_app -k gemm --kernel-iteration-range 1 -- ./my_app  # first gemm dispatch (3.10+)
+#   Dispatch-filter semantics are version-specific: 3.10 renamed -d/--dispatch to
+#   --kernel-iteration-range (1-based per-kernel iteration) and -d now means
+#   --output-directory. Older releases used -d/--dispatch, documented as a 0-based
+#   dispatch id ("-d 0" = first), though some 3.9 builds already treat it as 1-based
+#   per kernel. Check `rocprof-compute profile --help` on the installed version.
+rocprof-compute profile --name my_app --roof-only -- ./my_app      # roofline counters only
+rocprof-compute profile --list-available-metrics                   # block -> section -> metric ids
+
+# Analyze: results live under workloads/<name>/<gpu_model>/
+rocprof-compute analyze -p workloads/my_app/MI300X_A1/ --list-stats   # kernels and dispatch ids
+rocprof-compute analyze -p workloads/my_app/MI300X_A1/ -k 0           # CLI report for kernel id 0
+rocprof-compute analyze -p workloads/my_app/MI300X_A1/ --output-format db   # SQLite report for ROCm Optiq
+```
+
+Version note: the experimental `--gui` and `--tui` analyze interfaces were removed in rocprof-compute 3.11.0, so use the CLI or `--output-format db` with ROCm Optiq. See the version timeline in [Project Deep Dive: rocprof-compute](../career/Project_Deep_Dive_rocprof-compute.md#4-history-and-version-timeline).
+
+Read the report top-down:
+1. **Speed of light (SOL)**: achieved VALU/MFMA FLOP/s and HBM/L2/L1/LDS bandwidth as a percentage of peak. This tells you which ceiling is close.
+2. **Roofline**: the kernel's arithmetic intensity against empirically measured ceilings (worked math in [Performance Engineering -- Roofline](../computer-science/Performance_Engineering.md#3-roofline-model)).
+3. **Memory chart**: L1/L2 hit rates, HBM traffic, and LDS bank conflicts. Ask whether the data movement is necessary.
+4. **Wavefront / occupancy**: VGPR, LDS, or scratch limiters, and why waves stall (waiting on memory, barriers, dependencies).
+5. **Instruction mix**: VALU vs MFMA vs VMEM vs SALU vs LDS. A memory-bound kernel that is also VALU-heavy from address arithmetic is a hint.
+
+### Which Tool When
+
+| Question | Tool |
+|---|---|
+| Which kernels dominate, how long do they take, are there gaps? | `rocprofv3 --kernel-trace` + `rocpd summary` (or `--stats --output-format csv` on 6.x), or `--runtime-trace` + `rocpd convert -f pftrace` + Perfetto |
+| Why is end-to-end time high (CPU, I/O, MPI, launch overhead)? | `rocprof-sys` |
+| Why is *this kernel* slow (memory vs compute vs latency)? | `rocprof-compute` |
+| A specific counter for a specific kernel in CI | `rocprofv3 --pmc ... --kernel-include-regex` |
+| Registers, spills, occupancy before running | `-Rpass-analysis=kernel-resource-usage`, `--save-temps` (ISA) |
+| Live device health, clocks, partitions | `amd-smi` |
 
 ## 30.6 NVIDIA vs AMD GPU Terminology
 
@@ -4257,7 +4394,7 @@ omniperf analyze -p workloads/my_profile/
 | Multi-GPU comms | NCCL | RCCL |
 | Compiler | nvcc | hipcc (amdclang++) |
 | ISA | PTX → SASS | AMDGPU IR → GCN/CDNA ISA |
-| Profiler | Nsight Compute/Systems | Omniperf / Omnitrace / rocprof |
+| Profiler | Nsight Compute / Nsight Systems / CUPTI | rocprof-compute (formerly Omniperf) / rocprof-sys (formerly Omnitrace) / rocprofv3 on ROCprofiler-SDK |
 | Compute sanitizer | compute-sanitizer | rocm-debug-agent |
 
 ---
@@ -4281,6 +4418,8 @@ omniperf analyze -p workloads/my_profile/
 | Thrust | **rocThrust** | High-level parallel algorithms |
 | CUB | **hipCUB** | Block/warp/device primitives |
 | cuTENSOR | **hipTensor** | Tensor contractions |
+
+> **See also:** link these through their CMake config packages, not with `-lrocblas -I/opt/rocm/include`. Use `find_package(rocblas)` with `roc::rocblas`, `find_package(rccl)` with `roc::rccl`, and so on. The namespaces are inconsistent (`roc::`, `hip::`, none); the full table is in [CMake Fundamentals -- Linking ROCm Libraries and Profiler SDKs](../tools/CMake_Fundamentals.md#645-linking-rocm-libraries-and-profiler-sdks). One `-DCMAKE_PREFIX_PATH=/opt/rocm` finds all of them ([Finding ROCm](../tools/CMake_Fundamentals.md#644-finding-rocm-cmake_prefix_path-hiphost-hipdevice)).
 
 ### Example: rocBLAS GEMM
 
@@ -4332,6 +4471,8 @@ MPI_Recv(d_buf, count, MPI_FLOAT, src, tag, comm, &status);
 MPI_Allreduce(d_send, d_recv, count, MPI_FLOAT, MPI_SUM, comm);
 ```
 
+> **See also:** how to check whether your MPI build is actually ROCm-aware (`MPIX_ROCM_AWARE_SUPPORT` / `MPIX_Query_rocm_support()` in Open MPI 5, `MPICH_GPU_SUPPORT_ENABLED=1` on Cray MPICH), and what fails when it is not, is in [32.6](#326-building-hybrid-mpi--openmp--hip-code-with-cmake).
+
 ## 31.3 Multi-GPU with HIP
 
 ```cpp
@@ -4358,6 +4499,8 @@ hipMemcpyPeer(d_dest, dest_device, d_src, src_device, bytes);
 // Async peer copy
 hipMemcpyPeerAsync(d_dest, dest_device, d_src, src_device, bytes, stream);
 ```
+
+> **See also:** [34. Collective Communication Algorithms and Cost Model](#34-collective-communication-algorithms-and-cost-model) (RCCL API, ring/tree math, env vars, rccl-tests) and [35. Multi-GPU Programming Beyond Peer Copies](#35-multi-gpu-programming-beyond-peer-copies-hip) (IPC, graphs, memory pools, priorities, partitions).
 
 ## 31.4 AI/ML Frameworks with ROCm
 
@@ -4403,7 +4546,23 @@ The fundamental principle is the same: consecutive threads accessing consecutive
 
 **Q: What are the main ROCm profiling tools and when would you use each?**
 
-`rocprof` is the low-level command-line profiler for kernel timing, hardware counter collection, and basic tracing. `Omniperf` provides comprehensive analysis including roofline plots, memory charts, instruction mix breakdowns, and occupancy analysis -- use it for deep performance investigation. `Omnitrace` provides system-wide tracing (like Nsight Systems) showing CPU-GPU interaction timelines, MPI communication, and I/O. Use `rocm-smi` for real-time GPU monitoring (temperature, utilization, clock speeds).
+All current tools sit on **ROCprofiler-SDK**, the tool library that replaced ROCProfiler v1/v2 and ROCTracer (the role CUPTI plays on NVIDIA).
+- **`rocprofv3`** is the command-line profiler on that SDK. Use it for API/kernel/memory-copy tracing (`--kernel-trace`, `--runtime-trace`, `--sys-trace`), per-kernel statistics (`--stats`), and raw hardware counters (`--pmc`). It is the right tool for "which kernels dominate?" and for scripted counter collection in CI.
+- **`rocprof-sys`** (ROCm Systems Profiler, formerly Omnitrace) produces a whole-application Perfetto timeline: CPU sampling, HIP/HSA, RCCL, MPI, OpenMP. Use it when end-to-end time is the question, for example idle gaps, launch overhead, or communication waits. It is the analogue of Nsight Systems.
+- **`rocprof-compute`** (ROCm Compute Profiler, formerly Omniperf) is the per-kernel deep dive: speed-of-light panels, memory chart, roofline, occupancy limiters, instruction mix. It is the analogue of Nsight Compute.
+- **`amd-smi`** (successor to `rocm-smi`) covers device health, clocks, partitions, and topology.
+
+The workflow is: timeline first, then pick the top kernels, then deep-dive them, then fix and re-measure. The legacy `rocprof` and `rocprofv2` are deprecated. Watch for one behavior change: `rocprofv3 --hip-trace` traces only API calls, so add `--kernel-trace` to see kernels.
+
+**Q: Why were Omniperf and Omnitrace renamed, and why move to ROCprofiler-SDK?**
+
+In ROCm 6.3 the tools were renamed to `rocprof-compute` and `rocprof-sys` to put them under one product family with `rocprofv3`, and they are moving onto one shared collection layer. Before the SDK, there were separate libraries for tracing (ROCTracer) and for counters (ROCProfiler v1/v2), each with its own interception and its own buffering. Tools often could not run together, and every tool re-implemented the same plumbing. ROCprofiler-SDK provides one API for:
+- callback and buffered tracing of the HIP/HSA/RCCL/ROCTx APIs,
+- kernel-dispatch and memory-copy records,
+- dispatch and device counter collection,
+- PC sampling and thread trace.
+
+It also adds a single tool-registration model (`rocprofiler_configure`) and stable record formats, now with the rocpd SQLite output. The practical consequences: one interception path means lower overhead and fewer conflicts, new hardware only has to be enabled once, and `rocprof-compute` defaults to `rocprofv3` collection as of ROCm 7.0.
 
 ---
 
@@ -4523,6 +4682,8 @@ mpirun -np 16 --map-by ppr:4:node ./gpu_app
 srun -N 4 --ntasks-per-node=4 --gpus-per-task=1 ./gpu_app
 ```
 
+> **Note:** `rank % num_gpus` above is correct only when ranks are packed per node. A placement-independent mapping uses `MPI_Comm_split_type(MPI_COMM_TYPE_SHARED)`. That mapping, plus a tested CMake build of an MPI + OpenMP + HIP executable, is in [32.6](#326-building-hybrid-mpi--openmp--hip-code-with-cmake).
+
 ## 32.3 OpenMP + CUDA/HIP (Host Threading + GPU Offload)
 
 ```cpp
@@ -4613,6 +4774,243 @@ int main(int argc, char** argv) {
 | **MPI + GPU** | Multi-node, multi-GPU | 10-10,000 nodes with GPUs |
 | **MPI + OpenMP + GPU** | Large-scale HPC clusters | Supercomputer scale |
 
+## 32.6 Building Hybrid MPI + OpenMP + HIP Code with CMake
+
+> See also: [CMake Fundamentals -- HIP and ROCm with CMake](../tools/CMake_Fundamentals.md#64-hip-and-rocm-with-cmake) ([the HIP language project](../tools/CMake_Fundamentals.md#642-the-hip-language-a-complete-project), [finding ROCm and `hip::host`](../tools/CMake_Fundamentals.md#644-finding-rocm-cmake_prefix_path-hiphost-hipdevice), [linking ROCm libraries](../tools/CMake_Fundamentals.md#645-linking-rocm-libraries-and-profiler-sdks)), [find_package module vs config mode](../tools/CMake_Fundamentals.md#28-find_package-module-mode-vs-config-mode), [enable_testing and add_test](../tools/CMake_Fundamentals.md#42-enable_testing-and-add_test).
+
+The command lines in [1.4](#14-compilation-and-execution) (`mpicxx`), [9.2](#92-basic-parallel-region) (`-fopenmp`), and [25.5](#255-compilation) (`hipcc`) are fine for a one-file experiment. They stop working when one executable needs all three, because each wrapper wants to be *the* compiler. In CMake, each programming model maps to a different mechanism, and the three compose:
+
+| Model | CMake mechanism | What you get | Main pitfall |
+|---|---|---|---|
+| MPI | `find_package(MPI REQUIRED COMPONENTS CXX)` (a Find module shipped with CMake) | `MPI::MPI_CXX` (MPI include dirs + `libmpi`), plus `MPIEXEC_EXECUTABLE`, `MPIEXEC_NUMPROC_FLAG`, `MPIEXEC_PREFLAGS`, `MPIEXEC_POSTFLAGS` for tests | Setting `CMAKE_CXX_COMPILER=mpicxx` instead. It works, but it hides the dependency, and no target can opt out of MPI |
+| OpenMP | `find_package(OpenMP REQUIRED COMPONENTS CXX)` | `OpenMP::OpenMP_CXX`, whose compile option is `$<$<COMPILE_LANGUAGE:CXX>:-fopenmp>`, plus the runtime library (`libgomp` for GCC) | FindOpenMP supports only the C, CXX, CUDA, and Fortran components. There is **no HIP component**, so `.hip` files never get `-fopenmp` |
+| HIP | `project(p LANGUAGES CXX HIP)` | `.hip` files compiled by ROCm clang with `-x hip --offload-arch=...`; the HIP runtime is linked implicitly | Using `hipcc` as `CMAKE_HIP_COMPILER` (CMake rejects it) or leaving `CMAKE_HIP_ARCHITECTURES` unset |
+
+The working layout keeps the three concerns in separate translation units. GPU code goes in a `.hip` file behind a plain C++ header. MPI and OpenMP code goes in `.cpp` files compiled by the host compiler.
+
+```text
+hybrid/
+|-- CMakeLists.txt
+`-- src/
+    |-- kernels.hpp     <- plain C++ interface, no HIP types
+    |-- kernels.hip     <- kernel + launcher (ROCm clang)
+    `-- main.cpp        <- MPI + OpenMP host code (g++ with -fopenmp)
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.21...4.2)
+
+# Pin GPU targets before the HIP language is enabled (Section 64.2 of the CMake guide).
+set(CMAKE_HIP_ARCHITECTURES "gfx942;gfx950" CACHE STRING "AMD GPU targets")
+
+project(hybrid LANGUAGES CXX HIP)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+
+find_package(MPI REQUIRED COMPONENTS CXX)      # -> MPI::MPI_CXX, MPIEXEC_EXECUTABLE
+find_package(OpenMP REQUIRED COMPONENTS CXX)   # -> OpenMP::OpenMP_CXX (no HIP component)
+
+# Device code: compiled by ROCm clang (-x hip --offload-arch=...).
+add_library(kernels STATIC src/kernels.hip)
+target_include_directories(kernels PUBLIC src)
+
+# Host code: compiled by the system C++ compiler with -fopenmp and MPI include paths.
+add_executable(hybrid src/main.cpp)
+target_link_libraries(hybrid PRIVATE kernels MPI::MPI_CXX OpenMP::OpenMP_CXX)
+
+enable_testing()
+add_test(NAME hybrid_np2
+         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+                 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:hybrid> ${MPIEXEC_POSTFLAGS})
+set_tests_properties(hybrid_np2 PROPERTIES PROCESSORS 2
+                     ENVIRONMENT "OMP_NUM_THREADS=4")
+```
+
+```cpp
+// src/kernels.hpp
+#pragma once
+#include <cstddef>
+// Plain C++ interface: main.cpp never includes a HIP header.
+int gpu_device_count();
+// y[i] = a * (first + i) + 1 for i in [0, n), computed on GPU `device`.
+void gpu_affine(int device, float a, long long first, float* y, std::size_t n);
+```
+
+```cpp
+// src/kernels.hip
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include "kernels.hpp"
+
+#define HIP_CHECK(expr)                                                   \
+  do {                                                                    \
+    hipError_t err_ = (expr);                                             \
+    if (err_ != hipSuccess) {                                             \
+      std::fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__,             \
+                   hipGetErrorString(err_));                              \
+      std::exit(EXIT_FAILURE);                                            \
+    }                                                                     \
+  } while (0)
+
+__global__ void affine_kernel(float a, long long first, float* y, std::size_t n) {
+  std::size_t i = blockIdx.x * static_cast<std::size_t>(blockDim.x) + threadIdx.x;
+  if (i < n) y[i] = a * static_cast<float>(first + static_cast<long long>(i)) + 1.0f;
+}
+
+int gpu_device_count() {
+  int count = 0;
+  if (hipGetDeviceCount(&count) != hipSuccess) count = 0;
+  return count;
+}
+
+void gpu_affine(int device, float a, long long first, float* y, std::size_t n) {
+  HIP_CHECK(hipSetDevice(device));
+  float* dy = nullptr;
+  HIP_CHECK(hipMalloc(&dy, n * sizeof(float)));
+  const unsigned block = 256;
+  const unsigned grid = static_cast<unsigned>((n + block - 1) / block);
+  affine_kernel<<<grid, block>>>(a, first, dy, n);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(y, dy, n * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(dy));
+}
+```
+
+```cpp
+// src/main.cpp
+#include <mpi.h>
+#include <omp.h>
+#include <cstdio>
+#include <vector>
+#include "kernels.hpp"
+
+int main(int argc, char** argv) {
+  int provided = 0;
+  // Only the main thread calls MPI; OpenMP threads do host compute.
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+  if (provided < MPI_THREAD_FUNNELED) MPI_Abort(MPI_COMM_WORLD, 1);
+  int rank = 0, size = 1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  // Node-local rank -> GPU. rank % ndev is wrong when ranks are not packed per node.
+  MPI_Comm node;
+  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node);
+  int local_rank = 0;
+  MPI_Comm_rank(node, &local_rank);
+  const int ndev = gpu_device_count();
+  if (ndev == 0) {
+    if (rank == 0) std::fprintf(stderr, "no GPU visible\n");
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+  const int device = local_rank % ndev;
+
+  // Block decomposition of [0, N) that also handles N % size != 0.
+  const long long N = 1LL << 20;
+  const long long begin = N * rank / size, end = N * (rank + 1) / size;
+  std::vector<float> y(static_cast<std::size_t>(end - begin));
+
+  const float a = 2.0f;
+  gpu_affine(device, a, begin, y.data(), y.size());   // GPU: y = a*x + 1
+
+  double local = 0.0;                                  // CPU threads: reduce
+#pragma omp parallel for reduction(+ : local) schedule(static)
+  for (long long i = 0; i < static_cast<long long>(y.size()); ++i) local += y[i];
+
+  double global = 0.0;                                 // MPI: across ranks
+  MPI_Allreduce(&local, &global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+  const double expected = a * (double(N) * (N - 1) / 2.0) + double(N);
+  if (rank == 0)
+    std::printf("ranks=%d threads=%d thread_level=%d sum=%.0f expected=%.0f %s\n",
+                size, omp_get_max_threads(), provided, global, expected,
+                global == expected ? "OK" : "MISMATCH");
+  std::printf("rank %d -> local_rank %d -> GPU %d, elements [%lld, %lld)\n",
+              rank, local_rank, device, begin, end);
+
+  MPI_Comm_free(&node);
+  MPI_Finalize();
+  return global == expected ? 0 : 1;
+}
+```
+
+The expected sum is exact. With `a = 2` the values are `2x + 1` for `x = 0 .. N-1`, so the sum is `2 * N(N-1)/2 + N = N^2 = 2^40`. Each `float` value is at most `2^21 + 1`, which is below `2^24` and therefore exact, and the `double` running sums stay below `2^53`.
+
+Build, test, and run. This was captured on an MI350X node (gfx950) with Open MPI 5.0.10, GCC 15, CMake 4.2, and a TheRock ROCm nightly. Paths are shortened.
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_BUILD_TYPE=Release
+cmake --build build -v
+ctest --test-dir build --output-on-failure
+OMP_NUM_THREADS=4 mpirun -np 2 build/hybrid
+```
+
+```text
+-- Found MPI_CXX: /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi.so (found version "3.1")
+-- Found OpenMP_CXX: -fopenmp (found version "4.5")
+[1/4] /usr/bin/c++ -I src -isystem .../openmpi/include ... -O3 -DNDEBUG -std=gnu++17 -fopenmp -c src/main.cpp
+[2/4] /opt/rocm/lib/llvm/bin/clang++ -D__HIP_ROCclr__=1 ... --offload-arch=gfx942 --offload-arch=gfx950 -x hip -c src/kernels.hip
+[3/4] ar qc libkernels.a kernels.hip.o
+[4/4] /opt/rocm/lib/llvm/bin/clang++ ... main.cpp.o -o hybrid libkernels.a .../libamdhip64.so... .../openmpi/lib/libmpi.so .../gcc/x86_64-linux-gnu/15/libgomp.so ...
+1/1 Test #1: hybrid_np2 .......................   Passed    0.54 sec
+ranks=2 threads=4 thread_level=1 sum=1099511627776 expected=1099511627776 OK
+rank 0 -> local_rank 0 -> GPU 0, elements [0, 524288)
+rank 1 -> local_rank 1 -> GPU 1, elements [524288, 1048576)
+```
+
+What the verbose build shows:
+
+- **Each file goes to the right compiler.** `main.cpp` is compiled by `g++` with `-fopenmp` and the MPI include paths, which come from the `MPI::MPI_CXX` and `OpenMP::OpenMP_CXX` usage requirements. `kernels.hip` is compiled by ROCm clang with one `--offload-arch` per entry in `CMAKE_HIP_ARCHITECTURES`. It gets no `-fopenmp` and no MPI flags, because nothing in it needs them.
+- **The final link is done by ROCm clang**, not `g++`. `hybrid` has only a `.cpp` source, but it links a static library that contains HIP objects. CMake picks the linker language with the highest preference across the target and its static dependencies, which is HIP. The link line still pulls in GCC's `libgomp.so` and `libmpi.so` by full path, so mixing compilers works.
+- **`thread_level=1`** is `MPI_THREAD_FUNNELED` in Open MPI's numbering (`SINGLE=0` to `MULTIPLE=3`). Always compare `provided` against what you requested. An MPI library is allowed to return a lower level than you asked for.
+
+**Pitfall (verified): an OpenMP pragma in a `.hip` file is silently ignored.** Put this in `t.hip`, link it with `OpenMP::OpenMP_CXX`, and run it with `OMP_NUM_THREADS=4`:
+
+```cpp
+#include <cstdio>
+#include <omp.h>
+int main() {
+  int n = 0;
+#pragma omp parallel reduction(+ : n)
+  n += 1;
+  std::printf("threads that ran the region: %d\n", n);
+}
+```
+
+It prints `threads that ran the region: 1`. The link line includes `libgomp.so`, but the compile line has no `-fopenmp`, because the target's option is guarded by `$<COMPILE_LANGUAGE:CXX>`. Without `-fopenmp` the compiler drops the pragma and emits no warning by default. Clang reports it only with `-Wsource-uses-openmp`. The same file renamed to `.cpp` prints 4. The fix is the layout above: keep host-parallel loops in `.cpp` files. If a HIP translation unit really needs host OpenMP, add `target_compile_options(t PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fopenmp>)`. Then make sure only one OpenMP runtime ends up in the process. Clang's `-fopenmp` defaults to LLVM `libomp`, and GCC's uses `libgomp`. Two OpenMP runtimes in one process each create their own thread pool, which oversubscribes the cores.
+
+**Rank-to-GPU mapping.** `rank % ngpus` is correct only when consecutive ranks are packed onto the same node. Take 2 nodes with 4 GPUs each and 8 ranks placed round-robin (`mpirun --map-by node`). Node 0 gets ranks 0, 2, 4, 6, and `rank % 4` gives GPUs 0, 2, 0, 2. Two GPUs are shared and two sit idle. The node-local rank from `MPI_Comm_split_type(..., MPI_COMM_TYPE_SHARED, ...)` gives 0, 1, 2, 3 on every node, whatever the placement. If the launcher already restricts each rank to one GPU (Slurm `--gpus-per-task=1 --gpu-bind=closest` sets the visible-device variables per task), then `ndev == 1` and `local_rank % ndev` is 0. The same code is correct in both cases.
+
+**GPU-aware MPI is a property of the MPI build, not of your code.** This example stages through a host `std::vector`, so it works with any MPI. Passing `hipMalloc` pointers straight to `MPI_Send`/`MPI_Allreduce`, as in [31.2](#312-rocm-aware-mpi), needs a ROCm-aware build: for example Open MPI built with ROCm support (usually through UCX), or Cray MPICH with `MPICH_GPU_SUPPORT_ENABLED=1`. Open MPI 5 reports this in `<mpi-ext.h>`: the compile-time macro `MPIX_ROCM_AWARE_SUPPORT` and the run-time function `MPIX_Query_rocm_support()`. On the distro Open MPI 5.0.10 used above, the header contains `#define MPIX_ROCM_AWARE_SUPPORT 0`. That build is not ROCm-aware, and passing it device pointers would be a bug.
+
+**Testing MPI programs under CTest.** Build the launch command from the `MPIEXEC_*` variables instead of hard-coding `mpirun -np`. `MPIEXEC_NUMPROC_FLAG` is `-n` by default, and `MPIEXEC_PREFLAGS` can carry site flags such as `--oversubscribe` in CI. Set the `PROCESSORS` test property to the rank count, so that `ctest -j` does not schedule more MPI ranks than there are cores.
+
+### Interview Questions -- Building Hybrid Codes
+
+**Q1. Why not just set `CMAKE_CXX_COMPILER=mpicxx`, or `CXX=hipcc`, and be done?**
+
+Both work for small projects, but both are global. Every C++ file in the build, including unit tests and tools that have nothing to do with MPI or GPUs, gets compiled by the wrapper. The dependency is also invisible to CMake. Nothing in `target_link_libraries` says "this target needs MPI", so it cannot be exported to downstream projects through a package config, and a target cannot opt out. The two wrappers also conflict with each other: `mpicxx` wraps `g++` (or whatever `OMPI_CXX` points at), and `hipcc` wraps ROCm clang, so you cannot have both as the C++ compiler. With `MPI::MPI_CXX`, `OpenMP::OpenMP_CXX`, and the HIP language, each target states exactly what it needs, and CMake routes each file to the right compiler. Since CMake 3.21.3, `hipcc` is rejected outright as `CMAKE_HIP_COMPILER`.
+
+**Q2. A loop with `#pragma omp parallel for` scales on the CPU build but runs on one thread after you moved it into a `.hip` file. The code did not change. What happened?**
+
+`OpenMP::OpenMP_CXX` attaches `-fopenmp` only when the language is CXX (`$<$<COMPILE_LANGUAGE:CXX>:...>`), and FindOpenMP has no HIP component. The `.hip` file is compiled without `-fopenmp`, so the compiler ignores the pragma. Linking still succeeds because `libgomp` is on the link line, and calls such as `omp_get_max_threads()` still resolve. Diagnose it with `cmake --build build -v` (check for `-fopenmp` on that file's compile line) or with clang's `-Wsource-uses-openmp`, which prints `unexpected '#pragma omp ...' in program`. Clang's `-Wunknown-pragmas` does not catch this case. Fix it by moving host-parallel code back to a `.cpp` file, or by adding a HIP-guarded `-fopenmp` and making sure only one OpenMP runtime is linked.
+
+**Q3. How do you assign GPUs to MPI ranks, and what goes wrong with `rank % num_gpus`?**
+
+Use the node-local rank: `MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node)` followed by `MPI_Comm_rank(node, &local)`, then `hipSetDevice(local % ndev)`. `rank % ndev` assumes block placement with exactly `ndev` ranks per node. With round-robin placement (8 ranks, 2 nodes, 4 GPUs each), node 0 hosts ranks 0, 2, 4, 6, which map to GPUs 0, 2, 0, 2. Half the GPUs are idle, and the other half run two ranks each, which shows up as roughly 2x slower kernels. Also choose GPUs that are close to the rank's CPU cores and NIC (the NUMA domain). Slurm's `--gpu-bind=closest` or a per-rank wrapper script that sets `ROCR_VISIBLE_DEVICES` does this. Inside the program, `ndev` is then 1. Follow-up: verify the mapping by printing `hipDeviceProp_t::pciBusID` per rank, or with `rocm-smi --showpids`.
+
+**Q4. You pass a `hipMalloc` pointer to `MPI_Allreduce` and the job segfaults inside `libmpi`. Why, and how do you check before it happens?**
+
+The MPI build is not GPU-aware. It treats the buffer as host memory and copies from it with the CPU. A device address from `hipMalloc` is not host-accessible on discrete GPUs, so the copy faults. (On APUs such as MI300A, or with host-accessible allocations such as `hipMallocManaged` under XNACK, the copy may "work" but slowly.) Check at build time with `MPIX_ROCM_AWARE_SUPPORT` from `<mpi-ext.h>` (Open MPI) and at run time with `MPIX_Query_rocm_support()`. Fall back to staging through pinned host memory (`hipHostMalloc`), or use RCCL for GPU-to-GPU collectives ([34.9](#349-the-ncclrccl-api)). For Cray MPICH, the runtime switch is `MPICH_GPU_SUPPORT_ENABLED=1`, and the GTL library must be linked.
+
+**Q5. How do you run an MPI program as a CTest test, and what breaks under `ctest -j 8`?**
+
+Use `add_test(NAME t COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} <n> ${MPIEXEC_PREFLAGS} $<TARGET_FILE:app> ${MPIEXEC_POSTFLAGS})`. FindMPI fills these variables for the detected implementation. Without `PROCESSORS <n>`, CTest counts each MPI test as one slot, so `-j 8` can start eight 4-rank jobs (32 processes) on an 8-core runner. Open MPI then refuses with "not enough slots" unless `--oversubscribe` is set, or the jobs time out from oversubscription. For GPU tests, also declare GPU resources with `RESOURCE_GROUPS` and a resource spec file, so that two tests are not pinned to the same GPU ([parallel test execution](../tools/CMake_Fundamentals.md#44-parallel-test-execution)).
+
 ---
 
 # 33. Comprehensive Comparison Tables
@@ -4687,3 +5085,1515 @@ int main(int argc, char** argv) {
 | **Broadcast** | `MPI_Bcast` | `copyprivate` | Shared/constant memory | LDS/constant memory |
 
 ---
+
+# Part 6: Multi-GPU Communication and Portability
+
+---
+
+# 34. Collective Communication Algorithms and Cost Model
+
+---
+
+[Section 3](#3-collective-communication) covered the MPI collective *API*. This section covers how collectives are *implemented*, what they cost, and how the GPU collective libraries work. **NCCL** is NVIDIA's library. **RCCL** is AMD's fork of NCCL with the same API and the same `NCCL_*` environment variables, so the code ports by changing the header and the link line. Interviewers for ML-infra and HPC roles very often ask candidates to derive the cost of an allreduce.
+
+## 34.1 Collectives as Data Movement
+
+Let **N** be the number of ranks (GPUs) and **S** the buffer size in bytes. For reduce-scatter, S is the full input per rank. For all-gather, S is the full output per rank.
+
+| Collective | Before -> after | Bytes each rank must send (bandwidth lower bound) | nccl-tests `busbw` factor | Typical ML use |
+|---|---|---|---|---|
+| Broadcast | S on root -> S everywhere | S (pipelined) | 1 | Initial weights, config |
+| Reduce | S each -> sum on root | S (pipelined) | 1 | Metrics to rank 0 |
+| **AllReduce** | S each -> sum everywhere | **2(N-1)/N · S** | 2(N-1)/N | DDP gradient sync, tensor-parallel activations |
+| ReduceScatter | S each -> 1/N of the sum each | (N-1)/N · S | (N-1)/N | FSDP/ZeRO gradient sharding |
+| AllGather | S/N each -> S everywhere | (N-1)/N · S | (N-1)/N | FSDP/ZeRO parameter gathering |
+| AllToAll | N blocks of S/N -> transposed | (N-1)/N · S | (N-1)/N | MoE expert dispatch, distributed FFT/transpose |
+| Send/Recv | point to point | S | 1 | Pipeline parallelism, halo exchange |
+
+The key identity is **AllReduce = ReduceScatter + AllGather**. Both halves move (N-1)/N · S per rank, which is where the factor of 2 comes from. It also explains why ZeRO-3/FSDP costs about 1.5x the communication of DDP. DDP does one allreduce of the gradients (2Ψ for Ψ bytes of gradients). FSDP does an all-gather of the parameters in forward (Ψ), another in backward (Ψ), and a reduce-scatter of the gradients (Ψ), for 3Ψ in total.
+
+## 34.2 The Alpha-Beta (Hockney) Cost Model
+
+Model the time to send one message of n bytes as
+
+```text
+T(n) = α + n·β            (+ n·γ if the receiver also reduces the data)
+
+α  latency per message: software overhead, kernel/proxy wake-up, flag polling, wire + switch latency
+β  1 / bandwidth         (seconds per byte on the bottleneck link)
+γ  reduction cost per byte (on GPUs this streams from HBM at TB/s and is usually hidden)
+```
+
+**When does latency vs. bandwidth dominate?** The two terms are equal at n = α/β, sometimes written n½ because a single message of that size reaches half of peak bandwidth: n / (α + nβ) = 1/(2β) when nβ = α.
+
+| Link (approximate, per direction) | Bandwidth B | Typical α per step | α/β (= α·B) |
+|---|---|---|---|
+| MI300X xGMI, one peer link | 64 GB/s peak (~48 GB/s achieved) | ~1-3 µs | ~100-200 KB |
+| MI300X xGMI, all 7 links (8-GPU mesh) | 448 GB/s peak per GPU | ~1-3 µs | ~1 MB |
+| H100 NVLink4 via NVSwitch | 450 GB/s per GPU | ~1-3 µs | ~1 MB |
+| PCIe Gen5 x16 | ~64 GB/s theoretical | ~2-5 µs | ~200 KB |
+| InfiniBand NDR / 400G RoCE, one NIC | 50 GB/s | ~3-10 µs (end to end, with software) | ~250 KB |
+
+Messages much smaller than α/β are **latency-bound**: you want algorithms with few sequential steps. Messages much larger are **bandwidth-bound**: you want algorithms that send the minimum number of bytes and keep every link busy. Treat the α values as order-of-magnitude assumptions for back-of-envelope work, not as specifications. Measure them with rccl-tests or nccl-tests ([34.10](#3410-environment-variables-debugging-and-rccl-tests)).
+
+**Lower bounds for allreduce.** At least ⌈log2 N⌉ sequential steps are needed, because the number of ranks that hold information from a given rank can at most double per step. So latency ≥ log2 N · α. The bandwidth term is at least 2(N-1)/N · S · β (Patarasuk and Yuan, 2009). In the reduce-scatter half, each rank must receive the (N-1) other contributions to its own S/N shard. In the all-gather half, it must receive the (N-1) shards it does not own.
+
+## 34.3 Ring AllReduce = Reduce-Scatter + All-Gather
+
+Arrange the ranks in a logical ring (r sends to r+1 mod N) and split the buffer into N chunks of S/N bytes.
+
+1. **Reduce-scatter (N-1 steps).** At step t, rank r sends chunk (r - t) mod N to rank r+1, which adds it into its own copy of that chunk. Each chunk travels around the ring collecting one contribution per hop. After N-1 steps, rank r holds the fully reduced chunk (r + 1) mod N.
+2. **All-gather (N-1 steps).** At step t, rank r forwards the complete chunk (r + 1 - t) mod N. After N-1 more steps, every rank holds every reduced chunk.
+
+Worked trace for N = 4 (chunks c0..c3; the number in parentheses is how many ranks' contributions the chunk already contains):
+
+| Step | R0 sends to R1 | R1 sends to R2 | R2 sends to R3 | R3 sends to R0 |
+|---|---|---|---|---|
+| RS 1 | c0 (1) | c1 (1) | c2 (1) | c3 (1) |
+| RS 2 | c3 (2) | c0 (2) | c1 (2) | c2 (2) |
+| RS 3 | c2 (3) | c3 (3) | c0 (3) | c1 (3) |
+| *after RS* | *R0 owns final c1* | *R1 owns final c2* | *R2 owns final c3* | *R3 owns final c0* |
+| AG 1 | c1 | c2 | c3 | c0 |
+| AG 2 | c0 | c1 | c2 | c3 |
+| AG 3 | c3 | c0 | c1 | c2 |
+
+**Cost derivation.** There are 2(N-1) steps. In each step every rank sends S/N bytes and receives S/N bytes, and all N links are busy at the same time:
+
+```text
+T_ring = 2(N-1)·(α + (S/N)·β) + (N-1)·(S/N)·γ
+       = 2(N-1)·α  +  2·(N-1)/N · S·β  +  (N-1)/N · S·γ
+         \_______/    \______________/
+         latency:     bandwidth: -> 2·S·β as N grows,
+         linear in N  independent of N, equal to the lower bound
+```
+
+So the ring is **bandwidth-optimal** but its latency is **linear in N**. It is ideal for large gradient buffers on a moderate number of GPUs and bad for small messages or thousands of ranks. Real implementations also cut each chunk into smaller *slices* so successive steps pipeline. They run several rings ("channels") in parallel over different links, which also hides per-step latency.
+
+The simulation below checks both the result and the 2(N-1)/N · S byte count:
+
+```python
+"""Simulate ring allreduce (reduce-scatter + all-gather) on N ranks.
+
+Checks the result and counts the elements each rank sends, to confirm the
+2 * (N - 1) / N * S bandwidth term. Pure Python, no dependencies.
+"""
+
+
+def ring_allreduce(data):
+    n = len(data)                       # number of ranks
+    size = len(data[0])                 # elements per rank (S)
+    assert size % n == 0, "pad S to a multiple of N"
+    c = size // n                       # chunk size S / N
+    buf = [list(d) for d in data]
+    sent = [0] * n
+
+    def chunk(k):
+        return range(k * c, (k + 1) * c)
+
+    # Phase 1: reduce-scatter. At step t, rank r sends chunk (r - t) mod n to
+    # rank r + 1, which adds it into its own copy. All sends in a step happen
+    # "simultaneously", so read every outgoing chunk before applying any.
+    for t in range(n - 1):
+        msgs = [(r, (r - t) % n, [buf[r][i] for i in chunk((r - t) % n)]) for r in range(n)]
+        for r, k, payload in msgs:
+            dst = (r + 1) % n
+            for j, i in enumerate(chunk(k)):
+                buf[dst][i] += payload[j]
+            sent[r] += c
+    # Now rank r owns the fully reduced chunk (r + 1) mod n.
+
+    # Phase 2: all-gather. At step t, rank r forwards chunk (r + 1 - t) mod n.
+    for t in range(n - 1):
+        msgs = [(r, (r + 1 - t) % n, [buf[r][i] for i in chunk((r + 1 - t) % n)]) for r in range(n)]
+        for r, k, payload in msgs:
+            dst = (r + 1) % n
+            for j, i in enumerate(chunk(k)):
+                buf[dst][i] = payload[j]
+            sent[r] += c
+    return buf, sent
+
+
+if __name__ == "__main__":
+    for n in (2, 4, 8):
+        size = 24                                   # divisible by 2, 4, 8
+        data = [[(r + 1) * (i + 1) for i in range(size)] for r in range(n)]
+        out, sent = ring_allreduce(data)
+        expected = [sum(data[r][i] for r in range(n)) for i in range(size)]
+        assert all(row == expected for row in out)
+        ratio = sent[0] / size
+        print(f"N={n}: each rank sent {sent[0]} of S={size} elements "
+              f"-> {ratio:.3f} * S (2(N-1)/N = {2 * (n - 1) / n:.3f})")
+```
+
+Output:
+
+```text
+N=2: each rank sent 24 of S=24 elements -> 1.000 * S (2(N-1)/N = 1.000)
+N=4: each rank sent 36 of S=24 elements -> 1.500 * S (2(N-1)/N = 1.500)
+N=8: each rank sent 42 of S=24 elements -> 1.750 * S (2(N-1)/N = 1.750)
+```
+
+**Worked numbers (8 GPUs, B = 300 GB/s effective, α = 2 µs):**
+- S = 1 GiB of BF16 gradients (~537M parameters). Bandwidth term = 1.75 × 1.074 GB / 300 GB/s = **6.26 ms**. Latency term = 14 × 2 µs = **28 µs**. The operation is bandwidth-bound.
+- S = 64 KiB. Bandwidth term = 1.75 × 65,536 / 300 GB/s = **0.38 µs**. Latency term = **28 µs**. It is latency-bound by about 70x, so a log-step algorithm wins (see the table in 34.6).
+
+**algbw vs busbw.** rccl-tests and nccl-tests report `algbw = S / T` and `busbw = algbw × 2(N-1)/N` for allreduce. busbw is the number to compare with the per-GPU link bandwidth, because it removes the algorithm's 2(N-1)/N overhead. For the 1 GiB example, T ≈ 6.29 ms gives algbw = 171 GB/s and busbw = 299 GB/s, which matches the 300 GB/s link assumption.
+
+## 34.4 Tree and Double Binary Tree
+
+A **binary tree** allreduce is a reduce up the tree followed by a broadcast down it: 2·log2 N steps. Without pipelining, every step carries the whole buffer, so T = 2·log2 N·(α + S·β). That is good for tiny messages and terrible for large ones. With pipelining, the buffer is cut into k pieces that stream through the tree, and the time approaches 2·log2 N·α + (bandwidth term). The bandwidth term is the problem: an internal node receives from **two** children during the reduce and sends to two children during the broadcast, so its links carry about twice as much as a leaf's. A single pipelined binary tree therefore gets only about half of the link bandwidth.
+
+A **double binary tree** fixes this. NCCL adopted the construction in version 2.4, after Sanders, Speck and Träff (2009). Two binary trees are built so that every rank is an internal node in one tree and a leaf in the other. Each tree carries **half** of the data. Example for N = 8, where tree B is tree A shifted by one rank:
+
+```text
+Tree A (internal = odd ranks)          Tree B (= A shifted by +1; internal = even ranks)
+            7                                      0
+            |                                      |
+            3                                      4
+          /   \                                  /   \
+         1     5                                2     6
+        / \   / \                              / \   / \
+       0   2 4   6                            1   3 5   7
+```
+
+Per-rank traffic, with each tree handling S/2:
+- Internal in tree A: during the reduce it receives 2·(S/2) and sends S/2. During the broadcast it receives S/2 and sends 2·(S/2).
+- Leaf in tree B: during the reduce it sends S/2. During the broadcast it receives S/2.
+- Totals: it sends S/2 + S + S/2 = **2S** and receives S + S/2 + S/2 = **2S**.
+
+That is the same as the ring's 2(N-1)/N · S ≈ 2S, but with **logarithmic** latency:
+
+```text
+T_dbt ≈ 2·log2(N)·α + 2·S·β        (pipelined; ignores pipeline fill)
+```
+
+NCCL and RCCL use trees mainly *between* nodes. Within a node they use a chain. The tree pays off at large node counts and small-to-medium message sizes, where the ring's 2(N-1)·α term explodes.
+
+## 34.5 Recursive Doubling and Recursive Halving (Rabenseifner)
+
+These are the classic MPI algorithms (MPICH, Open MPI). They assume N is a power of two. Other values of N need an extra pre-step and post-step that fold the extra ranks in.
+
+- **Recursive doubling allreduce.** At step k = 0..log2 N - 1, rank r exchanges its *whole* vector with partner r XOR 2^k and both sides reduce. After log2 N steps everyone has the sum.
+  `T = log2 N · (α + S·β + S·γ)`. This is latency-optimal, but it sends log2 N · S bytes, which is bad for large buffers.
+- **Rabenseifner's algorithm** has two phases. Reduce-scatter by **recursive halving**: exchange half of the current working set with a partner at distance N/2, then N/4, and so on, sending S/2 + S/4 + ... + S/N = (N-1)/N · S in total. Then all-gather by **recursive doubling**, which mirrors the first phase.
+  `T = 2·log2 N·α + 2·(N-1)/N·S·β + (N-1)/N·S·γ`. This is both latency-optimal (up to a factor of 2) and bandwidth-optimal.
+
+GPU libraries favor rings and trees because those map onto fixed physical links with persistent, pre-connected channels. Recursive halving and doubling change partners every step (distance 2^k). On a ring, mesh, or rail-optimized fabric, that means multi-hop or contended paths and new connections.
+
+## 34.6 Comparing the Algorithms: Worked Numbers and the Crossover
+
+| Algorithm | Latency term | Bandwidth term | Best for |
+|---|---|---|---|
+| Ring | 2(N-1)·α | 2(N-1)/N·S·β | Large S, moderate N |
+| Recursive doubling | log2 N·α | log2 N·S·β | Tiny S |
+| Rabenseifner (halving + doubling) | 2·log2 N·α | 2(N-1)/N·S·β | Medium/large S, power-of-two N, CPU MPI |
+| Double binary tree (pipelined) | ≈ 2·log2 N·α | ≈ 2·S·β | Small/medium S at large N |
+| Hierarchical (34.7) | ≈ 2(G-1)·α_intra + [2(M-1) or 2·log2 M]·α_inter | ≈ 2(G-1)/G·S·β_intra + 2(M-1)/M·(S/G)·β_inter | Multi-node clusters |
+
+```python
+"""Alpha-beta cost model for allreduce algorithms.
+
+T = (number of sequential steps) * alpha + (bytes on the busiest link) * beta
+alpha: per-message latency (s); beta = 1 / bandwidth (s/byte). The reduction
+arithmetic (gamma term) is ignored: on a GPU it streams from HBM far faster
+than the link delivers bytes.
+"""
+from math import log2
+
+
+def ring(n, s, a, b):
+    return 2 * (n - 1) * a + 2 * (n - 1) / n * s * b
+
+
+def recursive_doubling(n, s, a, b):          # n must be a power of two
+    return log2(n) * (a + s * b)
+
+
+def rabenseifner(n, s, a, b):                # halving RS + doubling AG
+    return 2 * log2(n) * a + 2 * (n - 1) / n * s * b
+
+
+def double_binary_tree(n, s, a, b):          # pipelined, fill cost ignored
+    return 2 * log2(n) * a + 2 * s * b
+
+
+ALGOS = {"ring": ring, "rec-doubling": recursive_doubling,
+         "rabenseifner": rabenseifner, "dbl-bin-tree": double_binary_tree}
+
+
+def fmt(t):
+    return f"{t * 1e6:,.1f} us" if t < 1e-3 else f"{t * 1e3:,.2f} ms"
+
+
+def table(title, n, alpha, bw):
+    beta = 1.0 / bw
+    print(f"\n{title}: N={n}, alpha={alpha * 1e6:g} us, B={bw / 1e9:g} GB/s, "
+          f"alpha/beta={alpha * bw / 1e3:,.0f} KB")
+    print(f"{'S':>8} | " + " | ".join(f"{k:>13}" for k in ALGOS))
+    for s, label in [(8, "8 B"), (64 << 10, "64 KiB"), (1 << 20, "1 MiB"),
+                     (64 << 20, "64 MiB"), (1 << 30, "1 GiB")]:
+        print(f"{label:>8} | " + " | ".join(f"{fmt(f(n, s, alpha, beta)):>13}"
+                                              for f in ALGOS.values()))
+
+
+if __name__ == "__main__":
+    table("Intra-node (8 GPUs, xGMI mesh, multi-ring effective BW)", 8, 2e-6, 300e9)
+    table("Inter-node (64 GPUs, one 400 Gb/s NIC per GPU)", 64, 5e-6, 50e9)
+```
+
+Output (illustrative α and B; plug in your own measurements):
+
+```text
+Intra-node (8 GPUs, xGMI mesh, multi-ring effective BW): N=8, alpha=2 us, B=300 GB/s, alpha/beta=600 KB
+       S |          ring |  rec-doubling |  rabenseifner |  dbl-bin-tree
+     8 B |       28.0 us |        6.0 us |       12.0 us |       12.0 us
+  64 KiB |       28.4 us |        6.7 us |       12.4 us |       12.4 us
+   1 MiB |       34.1 us |       16.5 us |       18.1 us |       19.0 us
+  64 MiB |      419.5 us |      677.1 us |      403.5 us |      459.4 us
+   1 GiB |       6.29 ms |      10.74 ms |       6.28 ms |       7.17 ms
+
+Inter-node (64 GPUs, one 400 Gb/s NIC per GPU): N=64, alpha=5 us, B=50 GB/s, alpha/beta=250 KB
+       S |          ring |  rec-doubling |  rabenseifner |  dbl-bin-tree
+     8 B |      630.0 us |       30.0 us |       60.0 us |       60.0 us
+  64 KiB |      632.6 us |       37.9 us |       62.6 us |       62.6 us
+   1 MiB |      671.3 us |      155.8 us |      101.3 us |      101.9 us
+  64 MiB |       3.27 ms |       8.08 ms |       2.70 ms |       2.74 ms
+   1 GiB |      42.91 ms |     128.88 ms |      42.34 ms |      43.01 ms
+```
+
+**Crossover (ring vs. recursive doubling).** Setting the two formulas equal gives:
+
+```text
+2(N-1)·α + 2(N-1)/N·S·β = log2N·α + log2N·S·β
+=>  S* = (2(N-1) - log2 N) / (log2 N - 2(N-1)/N) · (α/β)
+
+N = 64:  S* = (126 - 6) / (6 - 1.969) · α/β ≈ 29.8 · α/β ≈ 29.8 × 250 KB ≈ 7.4 MB
+N = 8:   S* = (14 - 3) / (3 - 1.75)   · α/β = 8.8 · α/β  ≈ 8.8 × 600 KB  ≈ 5.3 MB
+```
+
+Below S*, the log-step algorithm wins. Above it, the ring (or Rabenseifner) wins. NCCL and RCCL make this choice automatically for every (collective, size, N, topology) using exactly this kind of latency + size/bandwidth model ([34.8](#348-how-ncclrccl-execute-collectives-channels-algorithms-protocols)).
+
+## 34.7 Hierarchical (Topology-Aware) Collectives
+
+Real clusters have two very different fabrics:
+
+| Fabric | Topology | Per-GPU bandwidth (peak, per direction) | Notes |
+|---|---|---|---|
+| **AMD Infinity Fabric / xGMI** (MI300X platform) | Fully connected mesh of 8 GPUs | 7 links × 64 GB/s = 448 GB/s; **64 GB/s to any single peer** | A single ring uses one outgoing link per GPU, so RCCL runs many channels over different ring orderings to light up all 7 links |
+| **NVIDIA NVLink + NVSwitch** (H100) | Switched | 450 GB/s (900 GB/s bidirectional) to *any* peer | NVSwitch can also reduce in the switch (NVLS) |
+| PCIe Gen5 x16 | Tree through switches / root complex | ~64 GB/s | P2P may cross the CPU root complex. Check GPU-NIC-CPU placement |
+| **InfiniBand / RoCE** | Fat tree, often "rail-optimized" (GPU i of every node on the same leaf switch) | 50 GB/s per 400 Gb/s NIC, typically 1 NIC per GPU | **GPUDirect RDMA**: the NIC reads and writes GPU memory directly, with no host bounce buffer |
+
+**Hierarchical allreduce** (G GPUs per node, M nodes, N = G·M):
+
+1. **Intra-node reduce-scatter** over xGMI/NVLink. Each GPU ends up owning S/G of the node-local sum.
+2. **Inter-node allreduce of each S/G shard** across the M nodes. This runs as G independent operations, one per GPU and its NIC ("rail"), using a ring or a tree.
+3. **Intra-node all-gather** to redistribute the result.
+
+```text
+T_hier ≈ [2(G-1)α_intra + 2·(G-1)/G·S·β_intra]                      (steps 1 + 3)
+       + [2(M-1)α_inter  or  2·log2(M)·α_inter] + 2·(M-1)/M·(S/G)·β_inter   (step 2)
+```
+
+The bandwidth on the slow links barely changes compared with a well-built flat multi-rail ring: 2(M-1)/M·S/G vs. 2(N-1)/N·S/G per NIC. The big win is **latency**: the number of slow-link steps drops from 2(N-1) to 2(M-1) or 2·log2 M. Traffic that can stay on the fast intra-node fabric also stays there.
+
+**Worked example: N = 1024 GPUs (M = 128 nodes × G = 8), S = 1 MiB** (a small tensor-parallel or optimizer-state collective). Assume α_inter = 5 µs, B_inter = 50 GB/s, α_intra = 2 µs, B_intra = 300 GB/s.
+
+| Algorithm | Latency term | Bandwidth term | Total |
+|---|---|---|---|
+| Flat ring over 1024 GPUs | 2·1023·5 µs = 10.23 ms | 2·(1023/1024)·1 MiB / 50 GB/s = 42 µs | **≈ 10.3 ms** |
+| Hierarchical, ring between nodes | 7·2 + 254·5 + 7·2 µs = 1.30 ms | 2·3.1 µs (intra) + 5.2 µs (inter) ≈ 11 µs | **≈ 1.3 ms** |
+| Hierarchical, double binary tree between nodes | 14 + 2·7·5 + 14 µs = 98 µs | ≈ 11 µs | **≈ 0.11 ms** |
+
+That is a ~95x difference for a 1 MiB message, purely from the latency term. This is why NCCL uses trees between nodes at scale, and why "my allreduce got slower when I scaled from 64 to 1024 GPUs" is a classic interview scenario.
+
+Practical topology checks:
+- `amd-smi topology -t` (or `rocm-smi --showtopo`) shows the link type (XGMI/PCIE) between GPU pairs. `nvidia-smi topo -m` shows NVLink/PCIe distances and the NIC affinity.
+- Bind each rank to the CPU NUMA node and NIC closest to its GPU. Otherwise GPUDirect RDMA may be disabled (see `NCCL_NET_GDR_LEVEL`) or traffic crosses the inter-socket link.
+- `NCCL_TOPO_DUMP_FILE=topo.xml` dumps the topology the library detected. Compare it with what you expect.
+
+## 34.8 How NCCL/RCCL Execute Collectives: Channels, Algorithms, Protocols
+
+- **Collectives are GPU kernels.** A collective is a kernel that copies and reduces through peer-mapped memory (P2P), shared host memory, or a network proxy thread that drives the NIC. Each **channel** is one workgroup/CTA running one ring or tree instance over a slice of the buffer. More channels mean more links in use and more bandwidth, but they also **consume more CUs/SMs**, which compete with your compute kernels during overlap.
+- **Algorithms:** `Ring` and `Tree` are common to both libraries (Tree means a double binary tree between nodes and a chain within a node). NVIDIA-specific additions include `CollNet` (in-network reduction with InfiniBand SHARP switches), `NVLS`/`NVLSTree` (NVSwitch multicast and in-switch reduction), and `PAT` (for all-gather and reduce-scatter at one GPU per node, in recent NCCL).
+- **Protocols** trade bandwidth for latency:
+
+| Protocol | Mechanism | Bandwidth efficiency | Latency | Used for |
+|---|---|---|---|---|
+| `LL` (low latency) | 8-byte stores of 4 B data + 4 B flag. The receiver polls the flag, so no separate fence/flag round trip is needed | ~50% | Lowest | Small messages |
+| `LL128` | 128-byte lines carrying 120 B data + 8 B flag. Relies on 128-byte store atomicity from the hardware and link | ~94% | Low | Small/medium. Only on platforms where it is validated |
+| `Simple` | Large chunks, with a memory fence and then a flag per chunk | ~100% | Highest | Large messages |
+
+- **Tuning model:** for every (collective, algorithm, protocol) pair, the library predicts `time = latency(algo, proto, N) + S / bandwidth(algo, proto, topology)` and picks the minimum. That is the alpha-beta model from 34.2. `NCCL_ALGO` and `NCCL_PROTO` override the choice. Use them for experiments and bug isolation, not as permanent settings.
+
+## 34.9 The NCCL/RCCL API
+
+Core concepts:
+- **`ncclUniqueId`**: an opaque 128-byte token. One rank creates it with `ncclGetUniqueId` and it is distributed **out of band** (MPI_Bcast, a TCP key-value store, a file). It identifies the communicator being created.
+- **`ncclCommInitRank(&comm, nranks, id, rank)`**: a *collective* call. Each rank creates its communicator for its current device, and the call blocks until all `nranks` ranks have joined.
+- **Collectives are asynchronous and stream-ordered.** `ncclAllReduce(send, recv, count, dtype, op, comm, stream)` only enqueues work. Completion is observed through the stream (events, `hipStreamSynchronize`). In-place operation (`send == recv`) is allowed.
+- **`ncclGroupStart()` / `ncclGroupEnd()`** serve three purposes:
+  1. A single thread can drive several GPUs (initialization and collectives) without deadlocking on the first blocking call.
+  2. Several collectives can be fused into one launch.
+  3. Matching `ncclSend`/`ncclRecv` pairs can be posted without ordering deadlocks.
+
+Complete single-process example. It drives every visible GPU from one thread and runs as-is on an 8-GPU node:
+
+```cpp
+// Single process, one thread, all visible GPUs: allreduce a float buffer.
+// Build: hipcc -O2 rccl_allreduce.cpp -lrccl -o rccl_allreduce
+#include <hip/hip_runtime.h>
+#include <rccl/rccl.h>   // NVIDIA: #include <nccl.h> and the cuda* equivalents
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#define HIP_CHECK(cmd) do { hipError_t e = (cmd); if (e != hipSuccess) { \
+    std::fprintf(stderr, "HIP %s:%d: %s\n", __FILE__, __LINE__, hipGetErrorString(e)); \
+    std::exit(1); } } while (0)
+#define NCCL_CHECK(cmd) do { ncclResult_t r = (cmd); if (r != ncclSuccess) { \
+    std::fprintf(stderr, "NCCL %s:%d: %s\n", __FILE__, __LINE__, ncclGetErrorString(r)); \
+    std::exit(1); } } while (0)
+
+int main() {
+    int ndev = 0;
+    HIP_CHECK(hipGetDeviceCount(&ndev));
+    const size_t count = 1 << 24;                 // 16M floats = 64 MiB per GPU
+
+    std::vector<float*> sendbuf(ndev), recvbuf(ndev);
+    std::vector<hipStream_t> streams(ndev);
+    std::vector<ncclComm_t> comms(ndev);
+
+    for (int d = 0; d < ndev; ++d) {
+        HIP_CHECK(hipSetDevice(d));
+        HIP_CHECK(hipMalloc(&sendbuf[d], count * sizeof(float)));
+        HIP_CHECK(hipMalloc(&recvbuf[d], count * sizeof(float)));
+        std::vector<float> h(count, float(d + 1));  // rank d contributes d+1
+        HIP_CHECK(hipMemcpy(sendbuf[d], h.data(), count * sizeof(float), hipMemcpyHostToDevice));
+        HIP_CHECK(hipStreamCreateWithFlags(&streams[d], hipStreamNonBlocking));
+    }
+
+    // 1) One rank creates the unique id; in multi-process jobs it is broadcast
+    //    out of band (MPI_Bcast, a TCP store, ...). Here all ranks share it.
+    ncclUniqueId id;
+    NCCL_CHECK(ncclGetUniqueId(&id));
+
+    // 2) ncclCommInitRank is collective: when one thread drives several GPUs,
+    //    the calls must be inside a group or the first call blocks forever.
+    NCCL_CHECK(ncclGroupStart());
+    for (int d = 0; d < ndev; ++d) {
+        HIP_CHECK(hipSetDevice(d));
+        NCCL_CHECK(ncclCommInitRank(&comms[d], ndev, id, d));
+    }
+    NCCL_CHECK(ncclGroupEnd());
+
+    // 3) Enqueue the allreduce on each GPU's stream. The call returns as soon
+    //    as the work is enqueued; completion is observed via the stream.
+    NCCL_CHECK(ncclGroupStart());
+    for (int d = 0; d < ndev; ++d) {
+        NCCL_CHECK(ncclAllReduce(sendbuf[d], recvbuf[d], count, ncclFloat, ncclSum,
+                                 comms[d], streams[d]));
+    }
+    NCCL_CHECK(ncclGroupEnd());
+
+    for (int d = 0; d < ndev; ++d) {
+        HIP_CHECK(hipSetDevice(d));
+        HIP_CHECK(hipStreamSynchronize(streams[d]));
+    }
+
+    // Every element should equal 1 + 2 + ... + ndev.
+    const float expected = ndev * (ndev + 1) / 2.0f;
+    float got = 0.0f;
+    HIP_CHECK(hipSetDevice(ndev - 1));
+    HIP_CHECK(hipMemcpy(&got, recvbuf[ndev - 1] + count - 1, sizeof(float), hipMemcpyDeviceToHost));
+    std::printf("ndev=%d expected=%.1f got=%.1f %s\n", ndev, expected, got,
+                got == expected ? "OK" : "MISMATCH");
+
+    for (int d = 0; d < ndev; ++d) {
+        NCCL_CHECK(ncclCommDestroy(comms[d]));
+        HIP_CHECK(hipSetDevice(d));
+        HIP_CHECK(hipStreamDestroy(streams[d]));
+        HIP_CHECK(hipFree(sendbuf[d]));
+        HIP_CHECK(hipFree(recvbuf[d]));
+    }
+    return got == expected ? 0 : 1;
+}
+```
+
+```text
+$ hipcc -O2 rccl_allreduce.cpp -lrccl -o rccl_allreduce && ./rccl_allreduce
+ndev=8 expected=36.0 got=36.0 OK
+```
+
+> **See also:** in CMake, link RCCL with `find_package(rccl REQUIRED)` and `target_link_libraries(app PRIVATE roc::rccl)`. The installed `rccl-targets.cmake` exports `roc::rccl`, even though one ROCm doc table says `rccl`. See [CMake Fundamentals -- Linking ROCm Libraries and Profiler SDKs](../tools/CMake_Fundamentals.md#645-linking-rocm-libraries-and-profiler-sdks).
+
+The production pattern is **one process per GPU**, with the id distributed by MPI:
+
+```cpp
+// fragment: one MPI rank per GPU
+int rank, nranks;
+MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+MPI_Comm_size(MPI_COMM_WORLD, &nranks);
+
+MPI_Comm node_comm;                                   // ranks on the same node
+MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node_comm);
+int local_rank;
+MPI_Comm_rank(node_comm, &local_rank);
+hipSetDevice(local_rank);                             // BEFORE creating the communicator
+
+ncclUniqueId id;
+if (rank == 0) ncclGetUniqueId(&id);
+MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+ncclComm_t comm;
+ncclCommInitRank(&comm, nranks, id, rank);
+ncclAllReduce(grads, grads, count, ncclBfloat16, ncclSum, comm, stream);   // in place
+// ... keep enqueueing work; synchronize only when the host needs the result
+ncclCommDestroy(comm);
+```
+
+All-to-all (MoE token dispatch) built from grouped point-to-point calls:
+
+```cpp
+// fragment: grouped send/recv; without the group, a blocking send to a peer
+// that is itself blocked in a send would deadlock
+ncclGroupStart();
+for (int peer = 0; peer < nranks; ++peer) {
+    ncclSend(sendbuf + peer * chunk, chunk, ncclFloat, peer, comm, stream);
+    ncclRecv(recvbuf + peer * chunk, chunk, ncclFloat, peer, comm, stream);
+}
+ncclGroupEnd();
+```
+
+Rules that cause hangs when broken:
+- **Every rank must call the same collectives in the same order, with the same count and datatype.** A rank that skips a collective, or calls collectives in a different order (for example, iterating over a `dict` whose order differs between processes), hangs everyone else.
+- A communicator must not be used concurrently from two host threads. Use one communicator per thread, or serialize access.
+- When one thread drives several GPUs, wrap the per-GPU calls in a group. Otherwise the first call blocks while it waits for ranks that will never be launched.
+- Errors are often asynchronous. Poll `ncclCommGetAsyncError`, and use `ncclCommAbort` from a watchdog with a timeout. PyTorch's NCCL watchdog does exactly this.
+
+## 34.10 Environment Variables, Debugging, and rccl-tests
+
+RCCL keeps the `NCCL_` prefix for compatibility.
+
+| Variable | Purpose |
+|---|---|
+| `NCCL_DEBUG=INFO` (`WARN`, `TRACE`) | Print the version, detected topology, rings/trees, transports (P2P/SHM/NET), and GDR use |
+| `NCCL_DEBUG_SUBSYS=INIT,GRAPH,TUNING,COLL,NET` | Restrict output to subsystems. `COLL` logs every collective call with its size, which is useful for finding the rank that diverged |
+| `NCCL_DEBUG_FILE=/tmp/nccl.%h.%p.log` | One log file per host and process |
+| `NCCL_ALGO=Ring` / `Tree`, `NCCL_PROTO=Simple` / `LL` / `LL128` | Force an algorithm or protocol (experiments, bug isolation) |
+| `NCCL_MIN_NCHANNELS` / `NCCL_MAX_NCHANNELS` | Channel count. More channels give more bandwidth but use more CUs |
+| `NCCL_SOCKET_IFNAME=eth0` | Interface for bootstrap and socket traffic |
+| `NCCL_IB_HCA=mlx5_0,mlx5_1` | Which InfiniBand/RoCE adapters to use |
+| `NCCL_NET_GDR_LEVEL` | Maximum GPU-NIC distance at which GPUDirect RDMA is used |
+| `NCCL_P2P_DISABLE=1`, `NCCL_SHM_DISABLE=1` | Turn off a transport to isolate a problem |
+| `NCCL_TOPO_DUMP_FILE`, `NCCL_GRAPH_DUMP_FILE` | Dump the detected topology and the computed rings/trees as XML |
+| `HSA_FORCE_FINE_GRAIN_PCIE=1` (RCCL) | Enable peer-to-peer access between PCIe-connected AMD GPUs |
+| `NCCL_IGNORE_CPU_AFFINITY=1` (RCCL tip) | Use GPU affinity only, ignoring the job's CPU mask. Can help multi-node scaling |
+
+RCCL's own usage-tips page also recommends raising `NCCL_MIN_NCHANNELS` on MI300X systems that use fewer than 8 GPUs. Check the RCCL documentation for your ROCm version, because these tips change between releases.
+
+**rccl-tests / nccl-tests** are the standard microbenchmarks:
+
+```bash
+git clone https://github.com/ROCm/rccl-tests && cd rccl-tests
+make HIP_HOME=/opt/rocm NCCL_HOME=/opt/rocm             # add MPI=1 MPI_HOME=/path/to/mpi for multi-node
+
+./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8           # 1 process, 8 GPUs, 8 B..128 MB, x2 steps
+mpirun -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1    # 8 nodes x 8 GPUs
+```
+
+How to read the output:
+- The `time` column at small sizes is effectively the per-collective latency, roughly steps × α. Its growth with N tells you whether you are on a ring or a tree.
+- `busbw` at large sizes should plateau near the bottleneck link bandwidth. If it plateaus well below, check the channel count, whether P2P or GDR is actually used (`NCCL_DEBUG=INFO`), NUMA and NIC binding, and the PCIe link width and generation.
+- The `#wrong` column must be 0. Non-zero values point to memory corruption or a broken transport.
+
+**Profiling communication:** `rocprofv3 --rccl-trace --kernel-trace` records RCCL API calls and the communication kernels. `rocprof-sys` shows RCCL waits on the whole-application timeline next to compute.
+
+> **See also:** [Distributed training with DDP/FSDP](ML_AI_Frameworks.md#7-distributed-training) (the framework side of these collectives), [ML Systems Design](ML_Systems_Design.md) (sizing data/tensor/pipeline parallelism and their communication budgets), [Math, Probability, and Estimation](../computer-science/Math_Probability_Estimation.md) (back-of-envelope technique), and [Performance Engineering -- Amdahl and strong/weak scaling](../computer-science/Performance_Engineering.md#2-amdahls-and-gustafsons-laws) (communication as the serial fraction).
+
+## 34.11 Interview Questions -- Collectives
+
+**Q1.** Derive the time for ring allreduce of S bytes on N GPUs. Why is it called bandwidth-optimal?
+
+Ring allreduce is a reduce-scatter followed by an all-gather, each with N-1 steps. In every step each rank sends one S/N-byte chunk to its neighbor, and all links are busy at once. Total: T = 2(N-1)·α + 2(N-1)/N·S·β (+ (N-1)/N·S·γ for the reduction arithmetic). The bandwidth term 2(N-1)/N·S·β equals the proven lower bound for allreduce, and it tends to 2·S·β *independent of N*. Adding GPUs does not increase the bytes per link. The catch is the latency term, which grows linearly with N. Common follow-up: "what changes with 2 GPUs?" The factor 2(N-1)/N = 1, so each GPU sends S bytes, which is the same as just exchanging buffers.
+
+**Q2.** Your allreduce of 1 MiB tensors got about 15x slower going from 64 to 1024 GPUs, but large-gradient allreduces barely changed. Explain it and fix it.
+
+The 1 MiB messages are in the latency regime (S ≲ α/β × a few). With a flat ring, the latency term 2(N-1)·α grows from 126α to 2046α (16.2x), while the bandwidth term stays at about 2·S·β. With the 34.6 numbers (α = 5 µs, B = 50 GB/s): T(64) ≈ 630 + 41 = 671 µs and T(1024) ≈ 10,230 + 42 = 10,272 µs, about 15x. Large buffers are bandwidth-dominated, so they do not notice. Follow-up: if the slowdown were much larger (say 50x or more), the ring latency term alone cannot explain it. A likely cause is that the 64-GPU run used a tree (≈ 2·log2 64·α + 2·S·β ≈ 60 + 42 ≈ 100 µs) while the 1024-GPU run was forced onto a ring, for example by a stale `NCCL_ALGO=Ring`. Fixes:
+- Use a tree or hierarchical algorithm (double binary tree between nodes: 2·log2 M·α).
+- Make sure the library's tuner is not being overridden by `NCCL_ALGO=Ring` (it is often left set from an old experiment).
+- Fuse small tensors into larger buckets so you pay α less often.
+- Use the LL/LL128 protocols for small messages.
+
+**Q3.** Why does NCCL use a *double* binary tree instead of one binary tree?
+
+In a pipelined binary tree, internal nodes receive from two children during the reduce and send to two children during the broadcast, so their links carry about 2x the traffic of a leaf. The tree then delivers only about half the bandwidth. With two complementary trees, each rank is internal in one and a leaf in the other, and each tree carries half the data. Every rank then sends and receives about 2S total, the same as the ring, while latency stays logarithmic.
+
+**Q4.** rccl-tests on an 8× MI300X node shows allreduce busbw of 150 GB/s at 1 GB. Good or bad? What would you check?
+
+It is low. Each GPU has 7 xGMI links at 64 GB/s peak per direction (448 GB/s aggregate). AMD reports about 48 GB/s achievable per link, so the practical ceiling is about 300+ GB/s busbw. Check the following:
+- Confirm `-g 8` (or 8 ranks) and P2P transport in `NCCL_DEBUG=INFO`, not SHM through host memory.
+- Check the channel count. A single ring uses one link per direction, so all 7 links need many channels with different ring orders.
+- Make sure no other process is using the GPUs, and check the compute/memory partition mode with `amd-smi`.
+- Check the ROCm/RCCL version and the RCCL tuning tips for that platform.
+- Check the message size: 1 GB should be well into the bandwidth regime.
+
+**Q5.** Compare the communication volume of DDP, ZeRO-2, and ZeRO-3/FSDP per step for Ψ bytes of gradients/parameters.
+
+- DDP: one gradient allreduce, ≈ 2Ψ per GPU.
+- ZeRO-2: reduce-scatter of gradients (Ψ), then all-gather of the updated parameters (Ψ), ≈ 2Ψ. That is the same volume, but with sharded optimizer state and gradients.
+- ZeRO-3/FSDP: parameter all-gather in forward (Ψ) + parameter all-gather in backward (Ψ) + gradient reduce-scatter (Ψ) ≈ 3Ψ, or 1.5x DDP. The payoff is that parameters are sharded too, so memory per GPU drops by about N times for parameters, gradients, and optimizer state.
+
+**Q6.** How does PyTorch DDP overlap gradient communication with backward, and what limits the overlap?
+
+Gradients are grouped into **buckets** (default 25 MB) in roughly reverse-layer order. As soon as all the gradients in a bucket are produced, an asynchronous allreduce for that bucket is launched on a separate communication stream, while backward continues on the compute stream. Limits:
+- The **last** bucket(s) cannot overlap.
+- Buckets that are too small pay α many times. Buckets that are too large delay the start of communication.
+- Collective kernels **consume CUs/SMs and memory bandwidth**, so compute slows down while they run.
+- All ranks must launch buckets in the same order.
+- Host-side synchronization (`.item()`, sync copies) serializes everything.
+
+**Q7.** A 256-GPU job hangs inside an allreduce. How do you debug it?
+
+1. Turn on `NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=COLL` (plus `NCCL_DEBUG_FILE` per process) and find the rank whose last collective sequence number or size differs. That is usually a rank that took a different code path, for example one that skipped a step on a NaN or built a different bucket order.
+2. Check for a crashed or OOM-killed rank. The other ranks wait forever unless a watchdog or timeout aborts them.
+3. Check the network: `NCCL_SOCKET_IFNAME`, `NCCL_IB_HCA`, firewall, IB link state. INIT logs show where bootstrap stalls.
+4. Use `py-spy dump` or gdb/rocgdb stack traces on a few ranks to see who is waiting where.
+5. Reproduce with rccl-tests on the same nodes to separate infrastructure problems from application problems.
+
+Mitigation: enable async error handling and timeouts so a hang turns into an error with a stack trace.
+
+**Q8.** Why does the topology of an MI300X node (xGMI mesh) change how collectives are implemented compared with an NVSwitch node?
+
+On NVSwitch, every GPU can send to *any* peer at its full NVLink bandwidth, so one ring per direction already saturates the GPU's injection bandwidth, and the switch can even reduce in the network (NVLS). On a fully connected xGMI mesh, each pair has a dedicated 64 GB/s link. A single ring uses only 1 of the 7 outgoing links, about 1/7 of the bandwidth. RCCL therefore runs many channels over different ring orderings (and direct all-to-all style patterns) so that all links carry traffic at once. That costs more CUs for communication kernels. It also means point-to-point bandwidth to one peer is limited to a single link, which matters for pipeline-parallel sends.
+
+---
+
+# 35. Multi-GPU Programming Beyond Peer Copies (HIP)
+
+---
+
+Sections [24.2](#242-multi-gpu-programming) and [31.3](#313-multi-gpu-with-hip) showed peer access and `hipMemcpyPeer`. Production multi-GPU code also needs:
+- memory shared *between processes*,
+- graphs to remove launch overhead,
+- stream-ordered allocation,
+- careful use of events and priorities,
+- a plan for sharing one GPU among several jobs.
+
+The HIP APIs below mirror CUDA one to one (`hipX` ↔ `cudaX`). Differences are called out where they exist. The complete programs were compiled with `hipcc` and run on an 8-GPU CDNA node.
+
+## 35.1 Process and Device Models
+
+| Model | How | Pros | Cons |
+|---|---|---|---|
+| **One process per GPU** (MPI, `torchrun`, Slurm) | Each rank calls `hipSetDevice(local_rank)` or sees only one GPU through `HIP_VISIBLE_DEVICES` | Fault isolation; the standard model for training; one RCCL communicator per process | Sharing device memory between ranks on a node needs IPC (libraries do this internally) |
+| **One thread per GPU** | `std::thread`/OpenMP, `hipSetDevice` in each thread (the current device is **per-thread** state) | One address space, cheap sharing of host data | One crash kills everything; easy to forget `hipSetDevice` in a new thread |
+| **One thread, many GPUs** | A loop with `hipSetDevice(d)` and group calls | Simple demos and tests | Host-side serialization; blocking calls deadlock collectives |
+
+Device visibility: `ROCR_VISIBLE_DEVICES` filters at the ROCr (HSA) level and accepts indices or UUIDs. Batch schedulers and container runtimes usually set it. `HIP_VISIBLE_DEVICES` filters at the HIP level, and its indices refer to the devices that ROCr already exposes. HIP also honors `CUDA_VISIBLE_DEVICES`. Setting more than one of them narrows the list twice, which is a common source of "device 0 is the wrong GPU" bugs.
+
+## 35.2 IPC: Sharing Device Memory Between Processes
+
+`hipIpcGetMemHandle` turns a device allocation into an opaque 64-byte handle. That handle is plain bytes and can be sent over a pipe, a socket, or MPI. Another process on the same node calls `hipIpcOpenMemHandle` and gets a pointer that maps the **same physical memory**. This is how intra-node communication libraries, PyTorch `torch.multiprocessing` CUDA/HIP tensor sharing, and inference servers avoid copying through the host.
+
+```cpp
+// Two processes share one device allocation through a HIP IPC handle.
+// Build: hipcc -O2 ipc_demo.cpp -o ipc_demo
+#include <hip/hip_runtime.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
+
+#define HIP_CHECK(cmd) do { hipError_t e = (cmd); if (e != hipSuccess) { \
+    std::fprintf(stderr, "[pid %d] HIP %s:%d: %s\n", getpid(), __FILE__, __LINE__, \
+                 hipGetErrorString(e)); std::exit(1); } } while (0)
+
+__global__ void add_one(int* p, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) p[i] += 1;
+}
+
+int main() {
+    constexpr int N = 1 << 20;
+    int to_child[2], to_parent[2];
+    if (pipe(to_child) != 0 || pipe(to_parent) != 0) return 1;
+
+    // Fork BEFORE any HIP call: the HIP runtime is not fork-safe, so each
+    // process must initialize its own runtime.
+    pid_t pid = fork();
+    if (pid == 0) {                                   // ---- consumer ----
+        hipIpcMemHandle_t handle;
+        if (read(to_child[0], &handle, sizeof(handle)) != sizeof(handle)) return 1;
+        HIP_CHECK(hipSetDevice(0));
+        int* d = nullptr;
+        HIP_CHECK(hipIpcOpenMemHandle(reinterpret_cast<void**>(&d), handle,
+                                      hipIpcMemLazyEnablePeerAccess));
+        add_one<<<(N + 255) / 256, 256>>>(d, N);      // writes the producer's memory
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());            // finish before signalling
+        HIP_CHECK(hipIpcCloseMemHandle(d));
+        char done = 1;
+        if (write(to_parent[1], &done, 1) != 1) return 1;
+        return 0;
+    }
+
+    // ---- producer ----
+    HIP_CHECK(hipSetDevice(0));
+    int* d = nullptr;
+    HIP_CHECK(hipMalloc(&d, N * sizeof(int)));        // must be a hipMalloc base pointer
+    HIP_CHECK(hipMemset(d, 0, N * sizeof(int)));
+    HIP_CHECK(hipDeviceSynchronize());
+    hipIpcMemHandle_t handle;
+    HIP_CHECK(hipIpcGetMemHandle(&handle, d));        // opaque bytes, safe to send
+    if (write(to_child[1], &handle, sizeof(handle)) != sizeof(handle)) return 1;
+
+    char done = 0;
+    if (read(to_parent[0], &done, 1) != 1) return 1;  // host-side sync point
+    int last = -1;
+    HIP_CHECK(hipMemcpy(&last, d + N - 1, sizeof(int), hipMemcpyDeviceToHost));
+    waitpid(pid, nullptr, 0);
+    std::printf("producer sees d[N-1] = %d (%s)\n", last, last == 1 ? "OK" : "FAIL");
+    HIP_CHECK(hipFree(d));                            // only after the consumer closed it
+    return last == 1 ? 0 : 1;
+}
+```
+
+```text
+$ hipcc -O2 ipc_demo.cpp -o ipc_demo && ./ipc_demo
+producer sees d[N-1] = 1 (OK)
+```
+
+IPC rules and pitfalls:
+- **Fork before initializing HIP.** A forked child must not use the parent's GPU context. Each process initializes its own runtime. Python's `multiprocessing` therefore needs the `spawn` start method with GPU frameworks.
+- **The handle describes a whole `hipMalloc` allocation (its base address).** Caching allocators hand out sub-ranges of big blocks, so they send the handle of the block *plus an offset*. PyTorch does exactly this. Memory from `hipMallocManaged`, from host allocations, or from some pools is not exportable through this API.
+- **Lifetime is the exporter's responsibility.** The exporter must not `hipFree` while importers still have the memory mapped. Importers call `hipIpcCloseMemHandle`. Opening a handle in the same process that created it fails (`hipErrorInvalidContext` on ROCm).
+- **IPC shares memory, not ordering.** You still need a synchronization protocol. The demo uses a host-side message after `hipDeviceSynchronize`. To order GPU work without a host round trip, export an event: create it with `hipEventCreateWithFlags(&ev, hipEventInterprocess | hipEventDisableTiming)`, share it with `hipIpcGetEventHandle` / `hipIpcOpenEventHandle`, and have the consumer call `hipStreamWaitEvent` on it.
+- **Modern alternative:** the virtual memory management (VMM) API. `hipMemCreate` with a POSIX file-descriptor handle type, then `hipMemExportToShareableHandle`, sends the FD over a Unix socket (`SCM_RIGHTS`). The importer uses `hipMemImportFromShareableHandle`, `hipMemMap`, and `hipMemSetAccess`. It gives finer control (mapping granularity, access rights, growable reservations), and newer NCCL/RCCL and PyTorch "expandable segments" build on it. IPC-exportable memory pools (`hipMemPoolExportToShareableHandle` / `hipMemPoolExportPointer`) are the stream-ordered equivalent.
+
+## 35.3 HIP Graphs: Stream Capture Semantics and Pitfalls
+
+`hipStreamBeginCapture` switches a stream into **capture mode**. Work submitted to it is *recorded* as graph nodes instead of executed. Recording an event on a capturing stream and making another stream wait on that event pulls the second stream into the same capture (a **fork**). Every forked stream must be **joined** back into the origin stream before `hipStreamEndCapture`. The graph is then instantiated once (validated and optimized into a `hipGraphExec_t`) and launched many times with a single submission per launch.
+
+```cpp
+// Capture a fork-join DAG (two streams) into a hipGraph, then replay it.
+// Also shows stream-ordered allocation inside the captured region.
+// Build: hipcc -O2 graph_demo.cpp -o graph_demo
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+
+#define HIP_CHECK(cmd) do { hipError_t e = (cmd); if (e != hipSuccess) { \
+    std::fprintf(stderr, "HIP %s:%d: %s\n", __FILE__, __LINE__, hipGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+__global__ void scale(float* x, float a, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) x[i] *= a;
+}
+__global__ void add(const float* a, const float* b, float* out, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) out[i] = a[i] + b[i];
+}
+__global__ void fill(float* x, float v, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) x[i] = v;
+}
+
+int main() {
+    const int n = 1 << 20, threads = 256, blocks = (n + threads - 1) / threads;
+    float *x, *y;
+    HIP_CHECK(hipMalloc(&x, n * sizeof(float)));
+    HIP_CHECK(hipMalloc(&y, n * sizeof(float)));
+
+    hipStream_t s0, s1;
+    HIP_CHECK(hipStreamCreateWithFlags(&s0, hipStreamNonBlocking));
+    HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
+    hipEvent_t fork_ev, join_ev;   // sync-only events: no timestamps needed
+    HIP_CHECK(hipEventCreateWithFlags(&fork_ev, hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&join_ev, hipEventDisableTiming));
+
+    // ---------------- capture ----------------
+    hipGraph_t graph;
+    HIP_CHECK(hipStreamBeginCapture(s0, hipStreamCaptureModeGlobal));
+    fill<<<blocks, threads, 0, s0>>>(x, 1.0f, n);
+    fill<<<blocks, threads, 0, s0>>>(y, 2.0f, n);
+    HIP_CHECK(hipEventRecord(fork_ev, s0));
+    HIP_CHECK(hipStreamWaitEvent(s1, fork_ev, 0));      // s1 joins the capture (fork)
+    scale<<<blocks, threads, 0, s0>>>(x, 3.0f, n);      // branch A on s0
+    scale<<<blocks, threads, 0, s1>>>(y, 4.0f, n);      // branch B on s1
+    HIP_CHECK(hipEventRecord(join_ev, s1));
+    HIP_CHECK(hipStreamWaitEvent(s0, join_ev, 0));      // join back before EndCapture
+    float* tmp = nullptr;                               // becomes a mem-alloc node
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&tmp), n * sizeof(float), s0));
+    add<<<blocks, threads, 0, s0>>>(x, y, tmp, n);      // tmp = 3 + 8 = 11
+    HIP_CHECK(hipMemcpyAsync(x, tmp, n * sizeof(float), hipMemcpyDeviceToDevice, s0));
+    HIP_CHECK(hipFreeAsync(tmp, s0));                   // becomes a mem-free node
+    HIP_CHECK(hipStreamEndCapture(s0, &graph));
+
+    size_t num_nodes = 0;
+    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+    hipGraphExec_t exec;
+    HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph, 0));
+
+    // ---------------- replay ----------------
+    for (int iter = 0; iter < 100; ++iter)
+        HIP_CHECK(hipGraphLaunch(exec, s0));            // one submission per DAG
+    HIP_CHECK(hipStreamSynchronize(s0));
+
+    float h = 0.0f;
+    HIP_CHECK(hipMemcpy(&h, x + n - 1, sizeof(float), hipMemcpyDeviceToHost));
+    std::printf("graph nodes=%zu  x[n-1]=%.1f (%s)\n", num_nodes, h, h == 11.0f ? "OK" : "FAIL");
+
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipEventDestroy(fork_ev));
+    HIP_CHECK(hipEventDestroy(join_ev));
+    HIP_CHECK(hipStreamDestroy(s0));
+    HIP_CHECK(hipStreamDestroy(s1));
+    HIP_CHECK(hipFree(x));
+    HIP_CHECK(hipFree(y));
+    return h == 11.0f ? 0 : 1;
+}
+```
+
+```text
+$ hipcc -O2 graph_demo.cpp -o graph_demo && ./graph_demo
+graph nodes=8  x[n-1]=11.0 (OK)
+```
+
+The 8 nodes are: 2 fills, 2 scales, a mem-alloc node, the add kernel, a memcpy node, and a mem-free node. The two `scale` kernels are siblings in the DAG, so they can run concurrently on replay.
+
+**Capture modes** decide which "potentially unsafe" API calls are rejected while a capture is in progress. Examples are `hipMalloc` and synchronous operations, which could implicitly synchronize with the captured stream:
+
+| Mode | Unsafe calls are prohibited... |
+|---|---|
+| `hipStreamCaptureModeGlobal` (default choice) | ...in this thread, and in any thread while some *other* thread has a global-mode capture open |
+| `hipStreamCaptureModeThreadLocal` | ...only in the thread that owns the capture. Use it when unrelated threads keep allocating |
+| `hipStreamCaptureModeRelaxed` | ...nowhere. You take responsibility for not breaking the capture |
+
+**Pitfalls.** The error names below were observed on ROCm. CUDA has the same `cudaErrorStreamCapture*` family.
+
+| Pitfall | What happens | Fix |
+|---|---|---|
+| Synchronous call during capture (`hipMemcpy`, `hipStreamSynchronize`, `hipDeviceSynchronize`, `hipEventSynchronize`, `hipStreamQuery`) | Returns `hipErrorStreamCaptureImplicit`/`Unsupported` and **invalidates** the capture. `hipStreamEndCapture` then returns `hipErrorStreamCaptureInvalidated` | Use only async APIs inside the region. Do host-side reads after replay |
+| `hipMalloc` during a global-mode capture | `hipErrorStreamCaptureUnsupported` | Allocate before capture, or use `hipMallocAsync` (it becomes an alloc node) |
+| Forked stream not joined back | `hipStreamEndCapture` returns `hipErrorStreamCaptureUnjoined` | Record an event on every side stream and make the origin stream wait on it |
+| Work launched into a stream that is **not** capturing (for example the null stream, while the capturing stream is non-blocking) | **Succeeds silently and runs eagerly. It is not in the graph** | Pass the capturing stream explicitly to every launch and library call (set the library handle's stream) |
+| Kernel arguments and copy sizes are **baked in by value** at capture time | Changing a host variable later has no effect on replay. Pointers must stay valid at the **same address** | Keep static buffers. Update with `hipGraphExecKernelNodeSetParams`, or re-capture and use `hipGraphExecUpdate` (cheap when the topology is unchanged). Or pass a device pointer to the changing parameter |
+| Host code between the captured calls | Runs **once**, at capture time, and not on replay | Move per-iteration host logic out of the graph, or use host nodes (`hipLaunchHostFunc`) |
+| Dynamic shapes / batch sizes | One graph is valid for one shape | Capture one graph per shape bucket. vLLM does this for decode batch sizes |
+| Library calls (rocBLAS, hipBLASLt, RCCL) | Must be capture-safe: no internal sync or allocation during the call | Pre-allocate library workspaces, set the handle's stream, and check that your version supports capture (NCCL supports it; RCCL supports it in recent ROCm releases) |
+| Launching the same `hipGraphExec_t` concurrently on two streams | Launches of one exec are serialized | Instantiate one exec per concurrent user |
+
+**When graphs pay off:** the GPU time per kernel is comparable to the CPU launch cost (a few µs per launch), for example LLM decode steps with hundreds of small kernels, or iterative solvers. They do not help a workload dominated by a few long kernels.
+
+## 35.4 Stream-Ordered Memory Allocation and Memory Pools
+
+`hipMalloc`/`hipFree` are expensive. They map and unmap pages, and `hipFree` implicitly synchronizes the device. Frameworks work around this with caching allocators. `hipMallocAsync`/`hipFreeAsync` (CUDA: `cudaMallocAsync`) build the same idea into the runtime:
+
+- **Semantics:** the allocation is usable by work enqueued on that stream *after* the `hipMallocAsync`. It becomes free when the stream *reaches* the `hipFreeAsync`. A later `hipMallocAsync` on the same stream can reuse that memory immediately, without waiting on the host.
+- **Cross-stream use:** another stream may touch the memory only after waiting on an event recorded after the allocation. A free on stream A followed by reuse on stream B is made safe by the pool, which tracks event dependencies. The pool attributes `hipMemPoolReuseFollowEventDependencies`, `hipMemPoolReuseAllowOpportunistic`, and `hipMemPoolReuseAllowInternalDependencies` control how aggressive reuse is.
+- **Release threshold:** by default (threshold 0) the pool returns unused memory to the driver at every synchronization, so the next iteration pays the mapping cost again. Set `hipMemPoolAttrReleaseThreshold` high to keep a warm cache.
+- **Pools:** each device has a default pool (`hipDeviceGetDefaultMemPool`). Custom pools (`hipMemPoolCreate`) can be IPC-exportable or have different access settings. `hipMallocFromPoolAsync` selects a pool explicitly.
+- **Inside graphs**, `hipMallocAsync`/`hipFreeAsync` become alloc/free nodes ([35.3](#353-hip-graphs-stream-capture-semantics-and-pitfalls)). Their memory can be reused across graph launches.
+
+```cpp
+// Stream-ordered allocation with the device's default memory pool, plus a
+// high-priority stream. Build: hipcc -O2 mempool_demo.cpp -o mempool_demo
+#include <hip/hip_runtime.h>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+
+#define HIP_CHECK(cmd) do { hipError_t e = (cmd); if (e != hipSuccess) { \
+    std::fprintf(stderr, "HIP %s:%d: %s\n", __FILE__, __LINE__, hipGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+__global__ void iota(float* x, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) x[i] = static_cast<float>(i);
+}
+
+int main() {
+    int dev = 0, supported = 0;
+    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, dev));
+    if (!supported) { std::printf("memory pools not supported\n"); return 0; }
+
+    // Keep up to 1 GiB cached in the pool across synchronizations instead of
+    // returning it to the driver (default threshold 0 = release at every sync).
+    hipMemPool_t pool;
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, dev));
+    uint64_t threshold = 1ull << 30;
+    HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
+
+    // Priorities: numerically LOWER = HIGHER priority. Query the legal range.
+    int least = 0, greatest = 0;
+    HIP_CHECK(hipDeviceGetStreamPriorityRange(&least, &greatest));
+    hipStream_t hi, lo;
+    HIP_CHECK(hipStreamCreateWithPriority(&hi, hipStreamNonBlocking, greatest));
+    HIP_CHECK(hipStreamCreateWithPriority(&lo, hipStreamNonBlocking, least));
+
+    const int n = 1 << 22;
+    for (int step = 0; step < 10; ++step) {
+        float* tmp = nullptr;
+        // Allocation becomes valid in stream order: no device-wide sync, and
+        // after the first iteration the pool reuses the same physical memory.
+        HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&tmp), n * sizeof(float), lo));
+        iota<<<(n + 255) / 256, 256, 0, lo>>>(tmp, n);
+        HIP_CHECK(hipFreeAsync(tmp, lo));  // freed when the stream reaches this point
+    }
+    float* small = nullptr;                 // latency-critical work goes to `hi`:
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&small), 64 * sizeof(float), hi));
+    iota<<<1, 64, 0, hi>>>(small, 64);      // dispatched ahead of queued `lo` workgroups
+    HIP_CHECK(hipFreeAsync(small, hi));
+    HIP_CHECK(hipStreamSynchronize(lo));
+    HIP_CHECK(hipStreamSynchronize(hi));
+
+    uint64_t reserved = 0, used = 0;
+    HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reserved));
+    HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used));
+    std::printf("priority range [least=%d, greatest=%d]; pool reserved=%llu MiB used=%llu MiB\n",
+                least, greatest, (unsigned long long)(reserved >> 20),
+                (unsigned long long)(used >> 20));
+    HIP_CHECK(hipStreamDestroy(hi));
+    HIP_CHECK(hipStreamDestroy(lo));
+    return 0;
+}
+```
+
+```text
+$ hipcc -O2 mempool_demo.cpp -o mempool_demo && ./mempool_demo
+priority range [least=1, greatest=-1]; pool reserved=128 MiB used=0 MiB
+```
+
+The pool kept 128 MiB reserved after ten 16 MiB allocations and frees. It reserves in large chunks and kept them because of the release threshold, so iterations 2-10 never went back to the driver. This is the same hazard model as PyTorch's caching allocator. There, using a tensor on a second stream without `tensor.record_stream(s)` lets its memory be reused while the second stream is still reading it.
+
+## 35.5 Events, Stream Priorities, and CU Masking
+
+| Event flag | Meaning | Use |
+|---|---|---|
+| `hipEventDefault` | Records timestamps | `hipEventElapsedTime` measurements |
+| `hipEventDisableTiming` | No timestamp; cheaper to record and wait on | Pure dependencies (`hipStreamWaitEvent`); recommended for sync-only events |
+| `hipEventBlockingSync` | `hipEventSynchronize` sleeps instead of spin-waiting | Frees a CPU core when waiting on long GPU work |
+| `hipEventInterprocess` | Shareable through `hipIpcGetEventHandle` (requires `DisableTiming`) | Cross-process GPU-side ordering |
+
+- `hipStreamWaitEvent(stream, ev)` creates a **GPU-side** dependency. The host does not block. This is the building block for fork/join pipelines and for overlapping communication with compute.
+- Event timing measures GPU timestamps on one stream. It includes any idle gaps between the two records. The first launch of a kernel also includes code-object loading, so warm up first.
+- **Stream priorities:** `hipDeviceGetStreamPriorityRange(&least, &greatest)`. A **numerically lower value means higher priority**. ROCm reported [least = 1, greatest = -1] on the test system; recent NVIDIA GPUs typically report [0, -5]. When CUs become free, the dispatcher prefers workgroups from higher-priority queues. Workgroups that are already running are not preempted, so priority helps most when the low-priority kernel is made of many short workgroups. Typical uses are communication kernels, latency-critical inference requests, and decode next to background prefill.
+- **Streams map to a limited set of hardware queues on AMD.** HIP assigns hardware queues to streams in creation order, with a default of 4 per priority level (`GPU_MAX_HW_QUEUES`). A fifth stream shares a queue with an earlier one, which can serialize work you expected to overlap. On Instinct GPUs the hardware scheduler maps up to 24 user-mode compute queues at once. Beyond that, queues are time-sliced (the driver logs "Runlist is getting oversubscribed").
+- **CU masking (AMD-specific):** `hipExtStreamCreateWithCUMask(&stream, num_words, mask)` restricts a stream's kernels to a subset of CUs. This is spatial partitioning inside one process, for example reserving CUs so communication kernels never starve, or running two models side by side with predictable latency.
+
+```cpp
+// fragment: restrict a stream to CUs 0..31 (mask is an array of 32-bit words, bit i = CU i)
+hipDeviceProp_t prop;
+hipGetDeviceProperties(&prop, 0);
+std::vector<uint32_t> mask((prop.multiProcessorCount + 31) / 32, 0u);
+mask[0] = 0xFFFFFFFFu;
+hipStream_t s;
+hipExtStreamCreateWithCUMask(&s, static_cast<uint32_t>(mask.size()), mask.data());
+```
+
+## 35.6 Sharing One GPU Between Processes: MPS, MIG, and AMD Partitions
+
+**NVIDIA:**
+- **Default:** each process has its own context, and kernels from different contexts are **time-sliced**. They do not run at the same time.
+- **MPS (Multi-Process Service):** a daemon funnels the work of many client processes into one hardware context, so their kernels **run concurrently**. Since Volta, each client gets an isolated address space and a configurable share of SMs (`CUDA_MPS_ACTIVE_THREAD_PERCENTAGE`). Fault isolation is weaker: a fatal GPU fault in one client can take down the others. Typical uses are many small MPI ranks or inference processes per GPU.
+- **MIG (Multi-Instance GPU, A100/H100 and later):** hardware partitions of up to 7 instances, each with dedicated SMs, L2 slices, and memory controllers. This gives real QoS and fault isolation, at the cost of fixed, coarse slices.
+
+**AMD:**
+- **No MPS-style daemon is needed for concurrency.** Each process owns its own user-mode queues and GPU virtual address space (VMID). The firmware hardware scheduler maps queues from several processes at once, so kernels from different processes can run concurrently. The limits are hardware queue slots and the number of processes per scheduling quantum. Past those limits the runlist is **oversubscribed** and round-robin time-sliced, and performance drops sharply. Reducing `GPU_MAX_HW_QUEUES` per process helps many processes fit.
+- **Spatial partitioning on MI300X (and later):**
+  - **Compute partitions:** **SPX** (one GPU with all 8 XCDs), **DPX** (2), **QPX** (4), and **CPX** (8 partitions, one XCD and 38 CUs each).
+  - **Memory (NUMA) partitions:** **NPS1** (interleaved across all HBM stacks) and **NPS4** (each quarter of HBM local to its XCDs).
+  - CPX + NPS4 turns one MI300X into 8 logical GPUs, 64 per 8-GPU node, each with local memory. That suits many small models and improves memory locality.
+  - Partitions are set with `amd-smi set -C CPX` / `amd-smi set -M NPS4` (root, no running workloads). The available modes differ by product; MI350-series parts also support DPX + NPS2.
+
+| Mechanism | Concurrency | Isolation (memory / fault / QoS) | Granularity |
+|---|---|---|---|
+| Time slicing (NVIDIA default) | No (serialized) | Yes / yes / no | Whole GPU |
+| NVIDIA MPS | Yes | Address space yes; fault partial; QoS by SM % | SM fraction |
+| NVIDIA MIG | Yes | Yes / yes / yes | Fixed slices (up to 7) |
+| AMD multi-process (HWS) | Yes, up to the queue limits | Yes / mostly / no | Whole GPU |
+| AMD CU masking | Yes | Same process / no / CU-level QoS | Per CU |
+| AMD compute + memory partitions | Yes | Yes / yes / yes | XCD (CPX) and HBM quarter (NPS4) |
+
+## 35.7 Overlapping Communication with Computation
+
+```cpp
+// fragment: overlap allreduce of gradient bucket b with backward compute of bucket b+1
+for (int b = 0; b < nbuckets; ++b) {
+    backward_bucket<<<grid, block, 0, compute>>>(b /*, ... */);   // produces grads[b]
+    hipEventRecord(ready[b], compute);
+    hipStreamWaitEvent(comm, ready[b], 0);          // comm waits for THIS bucket only
+    ncclAllReduce(grads[b], grads[b], count[b], ncclBfloat16, ncclSum, nccl_comm, comm);
+}
+hipEventRecord(comm_done, comm);
+hipStreamWaitEvent(compute, comm_done, 0);           // optimizer waits for all buckets
+optimizer_step<<<grid, block, 0, compute>>>(/* ... */);
+```
+
+**Exposed communication** = max(0, T_comm − T_overlappable_compute). Worked example: a 7B-parameter model with BF16 gradients (14 GB) on 8 GPUs at 300 GB/s busbw gives T_comm = 2·(7/8)·14 GB / 300 GB/s ≈ 82 ms. If backward takes 200 ms, almost all of it can hide behind compute except the last bucket. Overlap fails when:
+- communication runs on the same stream as compute, or on a blocking stream that synchronizes with the null stream;
+- host-side synchronization happens inside the loop;
+- the collectives' CUs and HBM bandwidth slow compute (use fewer channels, CU masking, or a higher-priority comm stream);
+- streams share a hardware queue (35.5).
+
+> **See also:** [Debugging and Profiling Tools](../tools/Debugging_and_Profiling_Tools.md) (rocgdb, sanitizers, hang debugging), [Containers and CI](../tools/Containers_and_CI.md) (passing `/dev/kfd` and `/dev/dri` and setting `ROCR_VISIBLE_DEVICES` in containers), [AMD GPU Architecture and Profiling](AMD_GPU_Architecture_and_Profiling.md) (XCDs, partitions, and queues from the hardware side), and [CS Fundamentals -- producer/consumer and synchronization](../computer-science/CS_Fundamentals.md#65-classic-concurrency-problems) (the CPU analogue of event-based stream ordering).
+
+## 35.8 Interview Questions -- Multi-GPU Runtime
+
+**Q1.** How does CUDA/HIP IPC work, and what are the pitfalls?
+
+The exporter calls `hipIpcGetMemHandle` on the base pointer of a `hipMalloc` allocation and sends the handle bytes to another process on the same node. The importer calls `hipIpcOpenMemHandle` and gets its own virtual address that maps the same physical memory. Pitfalls:
+- Only whole `hipMalloc` allocations are exportable, so caching allocators must also send an offset.
+- The exporter must keep the allocation alive until all importers close it.
+- Opening a handle in the creating process fails.
+- Forking after GPU initialization is unsafe.
+- IPC gives no ordering: use IPC events or a host protocol.
+
+The modern replacement is VMM handles passed as file descriptors.
+
+**Q2.** You captured a hipGraph, and on replay the kernel keeps using the old learning rate and an old buffer. Why?
+
+Stream capture records kernel arguments **by value** at capture time, including the scalar learning rate and the buffer pointer. Replay reuses exactly those values. Host code between the captured calls also ran only once. Fixes:
+- Store changing scalars in device memory and pass a pointer to them.
+- Keep buffers at fixed addresses (static or graph-private pools).
+- Update node parameters with `hipGraphExecKernelNodeSetParams`, or re-capture and `hipGraphExecUpdate` the exec.
+
+Follow-up: work launched into a non-capturing stream during capture silently runs eagerly and never appears in the graph.
+
+**Q3.** `hipMallocAsync` vs. `hipMalloc`: what is the difference, and what is the cross-stream hazard?
+
+`hipMalloc` is a synchronous, expensive driver call, and `hipFree` synchronizes the device. `hipMallocAsync` is ordered in a stream and served from a pool, so it is cheap after warm-up and never blocks the host. The memory is valid for work after the allocation *on that stream*. Using it on another stream requires an event dependency. Freeing it on one stream while another stream still reads it is a use-after-free unless the reader is ordered before the free. Set the release threshold, or the pool may return memory to the driver at every sync.
+
+**Q4.** You need to serve 8 small, latency-sensitive models on one MI300X. What are your options?
+
+1. **CPX + NPS4 partitions**: 8 isolated logical GPUs with local memory. Best isolation and locality; the partition is fixed and needs admin rights to reconfigure.
+2. **8 processes on an SPX GPU**: concurrency through the hardware scheduler. Simple, but there is no QoS, and you must stay within the hardware queue limits (lower `GPU_MAX_HW_QUEUES`).
+3. **One process with CU-masked streams**: fine-grained control, but one failure domain.
+4. **Batch the models in one server process**: best utilization if the models allow it.
+
+Pick based on the isolation, QoS, and ops-flexibility requirements.
+
+**Q5.** MPS vs. MIG?
+
+MPS shares one GPU among processes by running their kernels in a common hardware context. It gives high utilization and fine-grained, soft SM limits, but weak fault isolation and no memory-bandwidth or L2 QoS. MIG partitions the hardware itself (SMs, L2, memory controllers) into up to 7 instances, giving strong isolation and predictable performance, but the slices are coarse and fixed. MPS suits cooperative jobs owned by one user. MIG suits multi-tenant clouds.
+
+**Q6.** Does a high-priority stream preempt a running kernel?
+
+Not mid-workgroup. Priority affects which queued workgroups the dispatcher launches next when resources free up. A long-running low-priority kernel with few, long workgroups can still block a high-priority kernel until its workgroups finish. Priority is effective when the background kernel has many short workgroups. For hard guarantees, use spatial partitioning (CU masks, partitions, MIG). Remember that lower numbers mean higher priority.
+
+**Q7.** Communication is on its own stream, yet the profiler shows no overlap. List causes.
+
+- Both streams are actually the same stream, or the comm stream is a blocking stream that syncs with null-stream work.
+- The comm stream waits on an event recorded only after all of backward.
+- Host-side syncs (`.item()`, synchronous copies, `hipFree`) sit inside the loop.
+- On AMD, more than `GPU_MAX_HW_QUEUES` streams makes streams share a hardware queue.
+- Compute kernels occupy all CUs, so the collective's workgroups cannot start (the reverse also happens).
+- Collectives are launched in different orders on different ranks, so ranks wait on each other.
+
+Verify with a `rocprofv3 --runtime-trace` or `rocprof-sys` timeline: look at the queue/stream rows and the gaps.
+
+---
+
+# 36. Portable Programming Models and AMD Wave-Level Primitives
+
+---
+
+## 36.1 The Landscape: When and Why
+
+| Model | What it is | Backends / vendors | Who uses it | Notes |
+|---|---|---|---|---|
+| **CUDA** | NVIDIA's C++ language extensions + runtime | NVIDIA | Most GPU code and ML libraries | Richest ecosystem; locked to one vendor |
+| **HIP** | AMD's CUDA-shaped C++ extensions + runtime | AMD (native), NVIDIA (thin header layer over CUDA) | ROCm libraries, ported CUDA apps, PyTorch on ROCm | Porting from CUDA is largely mechanical (hipify). Same mental model as CUDA |
+| **SYCL 2020** | Khronos standard: single-source *ISO C++* (lambdas + library), no new keywords | Intel oneAPI DPC++ (Intel GPUs; NVIDIA/AMD through Codeplay plugins), **AdaptiveCpp** (formerly hipSYCL / Open SYCL: CUDA, HIP, Level Zero, OpenCL, generic JIT) | Aurora (Argonne) applications, Intel-centric codes, standards-driven projects | One standard, several implementations. Performance portability is not automatic |
+| **OpenCL** | Khronos C host API + OpenCL C kernels compiled at run time | Nearly every vendor, including mobile GPUs and FPGAs | Legacy HPC, embedded/mobile, FPGA, some imaging apps | Verbose. OpenCL 3.0 made most 2.x features optional. AMD's "workgroup"/"NDRange" terms come from it |
+| **Kokkos** | C++ performance-portability *library* (Sandia; now under the Linux Foundation's HPSF) | CUDA, HIP, SYCL, OpenMP, OpenMP-target, Threads, Serial | Trilinos, LAMMPS, many DOE apps | Abstracts both execution *and* data layout (`View`). One device backend per build |
+| **RAJA** (+ Umpire, CHAI) | C++ loop-execution abstraction (LLNL) with policies | CUDA, HIP, SYCL, OpenMP, SIMD | LLNL production codes | Loop-level only. Memory is handled by Umpire (allocation) and CHAI (movement) |
+| **OpenMP offload / OpenACC** | Directives on loops ([section 15](#15-openmp-target-offloading-gpu)) | All major vendors' compilers | Fortran/C++ HPC codes | Lowest porting effort. Less control |
+| **C++ stdpar** | `std::for_each(std::execution::par_unseq, ...)` offloaded by the compiler | NVIDIA `nvc++ -stdpar=gpu`, AMD `--hipstdpar` (ROCm clang), AdaptiveCpp | Simple data-parallel code | Requires unified/HMM memory or allocation interposition |
+| **Triton / DSLs** | Python tile-level kernel language | NVIDIA, AMD | ML kernels (attention, fused ops) | See [Triton Fundamentals](ML_AI_Frameworks.md#25-triton-fundamentals) |
+
+**Decision rules that hold up in interviews:**
+- **Existing CUDA code, need AMD:** HIP. It has the lowest effort and the same performance model, and you can keep one source for both vendors.
+- **A new decade-long HPC application that must run on Frontier/El Capitan (AMD), Aurora (Intel), and NVIDIA systems:** Kokkos or RAJA (or SYCL). The vendor abstraction is then one dependency that its maintainers keep current. Kokkos also abstracts the data layout, which matters for coalescing.
+- **Mostly loops over arrays, often in Fortran:** OpenMP offload or OpenACC.
+- **Intel GPUs are a primary target:** SYCL with DPC++.
+- **A few hot kernels need vendor-peak performance:** write native HIP/CUDA kernels or call vendor libraries (rocBLAS/hipBLASLt, cuBLAS) for those kernels, and keep the rest portable. Kokkos and SYCL both allow native-kernel interop.
+
+## 36.2 SYCL in One Page
+
+Key concepts and their HIP equivalents:
+
+| SYCL | HIP/CUDA |
+|---|---|
+| `sycl::queue` (device + in-order or out-of-order) | stream |
+| USM: `malloc_device` / `malloc_shared` / `malloc_host` | `hipMalloc` / `hipMallocManaged` / `hipHostMalloc` |
+| `buffer` + `accessor` (the runtime builds the dependency DAG from access modes) | No equivalent; you order work by hand with streams and events |
+| `nd_range`, work-group, work-item | grid, block, thread |
+| sub-group (size chosen by the implementation: e.g. 16/32 on Intel, 32/64 on AMD) | warp / wavefront |
+| `local_accessor` | `__shared__` / LDS |
+| `group_barrier`, `reduce_over_group`, `joint_exclusive_scan`, `sycl::reduction` | `__syncthreads`, hipCUB `BlockReduce`/`BlockScan` |
+
+Complete SYCL 2020 program. It needs a SYCL compiler, for example DPC++ `icpx -fsycl` or AdaptiveCpp `acpp -O3 --acpp-targets="hip:gfx942"`:
+
+```cpp
+#include <sycl/sycl.hpp>
+#include <cstdio>
+
+int main() {
+    sycl::queue q{sycl::gpu_selector_v, sycl::property_list{sycl::property::queue::in_order{}}};
+    const size_t n = 1 << 20;
+    const float a = 3.0f;
+    float* x = sycl::malloc_device<float>(n, q);
+    float* y = sycl::malloc_device<float>(n, q);
+    float* sum = sycl::malloc_shared<float>(1, q);
+    *sum = 0.0f;
+
+    q.fill(x, 1.0f, n);
+    q.fill(y, 2.0f, n);
+    q.parallel_for(sycl::range<1>{n}, [=](sycl::id<1> i) { y[i] = a * x[i] + y[i]; });
+    q.parallel_for(sycl::range<1>{n}, sycl::reduction(sum, sycl::plus<float>()),
+                   [=](sycl::id<1> i, auto& acc) { acc += y[i]; });
+    q.wait();
+
+    std::printf("sum = %.1f (expected %.1f) on %s\n", *sum, 5.0f * n,
+                q.get_device().get_info<sycl::info::device::name>().c_str());
+    sycl::free(x, q);
+    sycl::free(y, q);
+    sycl::free(sum, q);
+    return 0;
+}
+```
+
+The kernels are ordinary C++ lambdas, with no `__global__` and no `<<<>>>`. On AMD, AdaptiveCpp and the DPC++ AMD plugin both lower to the HIP/ROCm stack, so `rocprofv3` and `rocprof-compute` still see the kernels.
+
+## 36.3 HIP vs. SYCL Trade-offs
+
+| Aspect | HIP | SYCL |
+|---|---|---|
+| Governance | AMD-led open source; API shaped by CUDA | Khronos open standard; multiple implementations |
+| Syntax | C++ plus kernel qualifiers and `<<<>>>` | Pure ISO C++17 (templates, lambdas) |
+| Vendors | AMD native; NVIDIA via CUDA | Intel native; NVIDIA/AMD via plugins or AdaptiveCpp |
+| Porting from CUDA | Mechanical (`hipify-clang`/`hipify-perl`) | SYCLomatic/`dpct` migration plus manual rewriting |
+| Memory/dependencies | Explicit pointers, streams, events | USM pointers, or buffers/accessors with automatic DAG |
+| Low-level control | Wave intrinsics, inline asm, `__launch_bounds__`, LDS, everything in ROCm | Sub-group functions; vendor extensions for more; features can lag hardware |
+| Wave/sub-group size | `warpSize` (32 or 64), explicit | Chosen by the implementation; request with `reqd_sub_group_size` |
+| Libraries | rocBLAS, hipBLASLt, MIOpen, RCCL directly | oneMKL/oneDNN (with cuBLAS/rocBLAS backends); interop for the rest |
+| Tooling on AMD | ROCm profilers and debuggers natively | Works through the HIP backend; kernel names and symbols can be less readable |
+| Main risk | Tied to the pace of the AMD/NVIDIA ecosystems | Implementation gaps; "portable" code still needs per-target tuning |
+
+The honest answer is "it depends on the target matrix". Choose HIP for CUDA heritage with AMD+NVIDIA targets. Choose SYCL when Intel matters or policy requires a standard. Choose Kokkos for a large HPC code that wants one source *and* layout abstraction.
+
+## 36.4 Kokkos and RAJA
+
+**Kokkos** separates *where* code runs (execution space) from *where* data lives (memory space) and *how* it is laid out (layout):
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <cstdio>
+
+int main(int argc, char* argv[]) {
+    Kokkos::ScopeGuard guard(argc, argv);             // initialize/finalize
+    const int n = 1 << 20;
+    Kokkos::View<float*> x("x", n), y("y", n);        // allocated in the default memory space
+
+    Kokkos::parallel_for("init", n, KOKKOS_LAMBDA(const int i) { x(i) = 1.0f; y(i) = 2.0f; });
+    const float a = 3.0f;
+    Kokkos::parallel_for("axpy", n, KOKKOS_LAMBDA(const int i) { y(i) = a * x(i) + y(i); });
+
+    float sum = 0.0f;
+    Kokkos::parallel_reduce("sum", n, KOKKOS_LAMBDA(const int i, float& acc) { acc += y(i); }, sum);
+    std::printf("sum = %.1f (expected %.1f) on %s\n", sum, 5.0f * n,
+                Kokkos::DefaultExecutionSpace::name());
+    return 0;
+}
+```
+
+```bash
+# Build Kokkos once for MI300X, then link apps with find_package(Kokkos) + Kokkos::kokkos
+cmake -S kokkos -B build-kokkos -DCMAKE_CXX_COMPILER=hipcc -DKokkos_ENABLE_HIP=ON \
+      -DKokkos_ARCH_AMD_GFX942=ON -DCMAKE_INSTALL_PREFIX=$HOME/kokkos-hip
+cmake --build build-kokkos --target install
+```
+
+> **See also:** Kokkos's own HIP backend is configured with `hipcc` as the C++ compiler, as shown above. For your own HIP code, prefer CMake's HIP language; the reasons are in [CMake Fundamentals -- Three Ways to Build HIP Code](../tools/CMake_Fundamentals.md#641-three-ways-to-build-hip-code). Consuming an installed package such as Kokkos via `find_package(... CONFIG)` is covered in [find_package: Module Mode vs Config Mode](../tools/CMake_Fundamentals.md#28-find_package-module-mode-vs-config-mode).
+
+- **`View` layouts:** a 2-D `View<double**>` defaults to `LayoutLeft` (column-major) on GPU spaces and `LayoutRight` (row-major) on CPU spaces. With the parallel index on the first dimension, `LayoutLeft` makes consecutive threads touch consecutive addresses (coalescing). `LayoutRight` makes each CPU thread stream through its own contiguous row (caches and vectorization). The same source therefore gets the right access pattern on both. Use `create_mirror_view` + `deep_copy` for host-device transfers.
+- **Hierarchical parallelism:** `TeamPolicy` maps to workgroups, `TeamThreadRange` to threads, and `ThreadVectorRange` to SIMD lanes. Team scratch memory maps to LDS.
+- **Tooling:** Kokkos Tools callbacks name every kernel by its label ("axpy"). Recent `rocprofv3` versions accept `--kokkos-trace`.
+
+**RAJA** abstracts only the loop; you pick the execution policy:
+
+```cpp
+// fragment: RAJA forall with a HIP policy (256 threads per block) and a reduction
+RAJA::ReduceSum<RAJA::hip_reduce, double> total(0.0);
+RAJA::forall<RAJA::hip_exec<256>>(RAJA::RangeSegment(0, n), [=] RAJA_DEVICE (int i) {
+    y[i] = a * x[i] + y[i];
+    total += y[i];
+});
+double result = total.get();
+// Swap the policy to RAJA::omp_parallel_for_exec / RAJA::seq_exec for CPU builds.
+```
+
+## 36.5 OpenCL in Brief
+
+The host program walks a long chain of calls: platform -> device -> context -> command queue -> `clCreateProgramWithSource` + `clBuildProgram` (the kernel is compiled **at run time**) -> kernel -> buffers -> `clSetKernelArg` -> `clEnqueueNDRangeKernel` -> read back.
+
+```c
+// fragment: OpenCL C kernel, compiled at run time by clBuildProgram
+__kernel void saxpy(const float a, __global const float* x, __global float* y) {
+    size_t i = get_global_id(0);
+    y[i] = a * x[i] + y[i];
+}
+```
+
+| OpenCL | HIP/CUDA |
+|---|---|
+| work-item / work-group / NDRange | thread / block / grid |
+| `get_global_id(0)` | `blockIdx.x * blockDim.x + threadIdx.x` |
+| `get_local_id(0)` / `get_group_id(0)` | `threadIdx.x` / `blockIdx.x` |
+| `__local` / `__global` / `__constant` | `__shared__` / device pointer / `__constant__` |
+| `barrier(CLK_LOCAL_MEM_FENCE)` | `__syncthreads()` |
+| sub-group (extension / 2.x+) | warp / wavefront |
+
+Why CUDA won the HPC/ML market even though OpenCL is portable: single-source C++ instead of strings compiled at run time, a far better library ecosystem (cuBLAS, cuDNN, NCCL), better tools, and NVIDIA's consistent investment. OpenCL's 2.x features were never universally implemented. ROCm still ships an OpenCL runtime, and OpenCL remains common on mobile and embedded GPUs and FPGAs.
+
+## 36.6 AMD Cross-Lane Operations: DPP, ds_swizzle, ds_bpermute, readlane
+
+CUDA exposes `__shfl_*_sync` as the one cross-lane primitive. GCN/CDNA hardware has several mechanisms with different reach and cost. They matter when you read ISA in `rocprof-compute` or with `--save-temps`, and when you need the last few percent of a reduction or scan:
+
+| Mechanism | Reach | Cost | HIP access | Typical use |
+|---|---|---|---|---|
+| **DPP** (Data Parallel Primitives) | A VALU *operand modifier*: the source is read from another lane, mostly **within a row of 16 lanes** (`quad_perm`, `row_shl/shr/ror`, `row_mirror`). On gfx9/CDNA, `row_bcast:15/31` and `wave_shr/rol` cross rows | Cheapest: folded into the ALU instruction, no LDS pipeline | `__builtin_amdgcn_update_dpp`, `__builtin_amdgcn_mov_dpp` | Inner steps of wave reductions and scans (rocPRIM uses them) |
+| **`ds_swizzle_b32`** | Fixed patterns within **32-lane** groups: bit-mask mode (and/or/xor masks) or quad-perm mode | Goes through the LDS crossbar (needs `s_waitcnt lgkmcnt`) but uses no LDS memory | `__builtin_amdgcn_ds_swizzle(v, pattern)` | Butterflies across 16/32 lanes |
+| **`ds_bpermute_b32` / `ds_permute_b32`** | **Arbitrary** gather (bpermute) or scatter (permute) across all 64 lanes; the address is `lane * 4` bytes | LDS-crossbar latency; no LDS allocation | `__builtin_amdgcn_ds_bpermute(addr, v)`. **`__shfl*` always lowers to this**, even for constant offsets (verified with `hipcc -O3 --offload-arch=gfx942`); the compiler does not turn constant xor patterns into DPP | General shuffles |
+| **`v_readlane_b32` / `v_readfirstlane_b32`** (and `v_writelane`) | One lane's VGPR value to an **SGPR** (wave-uniform) | Cheap, but serializes when used in a loop | `__builtin_amdgcn_readlane(v, lane)`, `__builtin_amdgcn_readfirstlane(v)` | Broadcasts, final reduction value, making a value provably uniform |
+
+RDNA (gfx10+) changes the DPP set: `row_bcast`/`wave_*` are gone and `v_permlane16_b32`/`v_permlanex16_b32` are added. Hand-written DPP code is therefore architecture-specific.
+
+Complete program comparing the portable shuffle with hand-written cross-lane code, plus a wave-aggregated atomic. It needs a wave64 CDNA GPU:
+
+```cpp
+// Three ways to reduce across a 64-lane CDNA wavefront, plus a wave-aggregated
+// atomic that uses 64-bit ballot masks. Build for CDNA (wave64), e.g.:
+//   hipcc -O3 --offload-arch=gfx942 wave_ops.cpp -o wave_ops
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#define HIP_CHECK(cmd) do { hipError_t e = (cmd); if (e != hipSuccess) { \
+    std::fprintf(stderr, "HIP %s:%d: %s\n", __FILE__, __LINE__, hipGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+// (a) Portable: HIP's __shfl_xor always lowers to ds_bpermute_b32, even for
+//     constant offsets (no automatic DPP). Works for any warpSize.
+__device__ int wave_sum_shfl(int v) {
+    for (int off = warpSize / 2; off > 0; off >>= 1) v += __shfl_xor(v, off);
+    return v;
+}
+
+// (b) Hand-written AMDGCN cross-lane ops (gfx9/CDNA, wave64 only).
+__device__ int wave_sum_dpp(int v) {
+    // DPP: a VALU operand modifier; lanes move only within a 16-lane row.
+    // update_dpp(old, src, dpp_ctrl, row_mask, bank_mask, bound_ctrl)
+    v += __builtin_amdgcn_update_dpp(0, v, 0xB1, 0xF, 0xF, false);  // quad_perm[1,0,3,2]: lane^1
+    v += __builtin_amdgcn_update_dpp(0, v, 0x4E, 0xF, 0xF, false);  // quad_perm[2,3,0,1]: lane^2
+    v += __builtin_amdgcn_update_dpp(0, v, 0x124, 0xF, 0xF, false); // row_ror:4
+    v += __builtin_amdgcn_update_dpp(0, v, 0x128, 0xF, 0xF, false); // row_ror:8 -> row (16) sum
+    // ds_swizzle (bit-mask mode) works within 32-lane halves:
+    // offset = and_mask | or_mask << 5 | xor_mask << 10 -> 0x401F = lane ^ 16
+    v += __builtin_amdgcn_ds_swizzle(v, 0x401F);                    // 32-lane sum
+    // ds_bpermute: arbitrary gather across the whole wave; address is lane*4 bytes.
+    int src_lane = static_cast<int>(__lane_id()) ^ 32;
+    v += __builtin_amdgcn_ds_bpermute(src_lane << 2, v);            // 64-lane sum
+    return v;
+}
+
+// (c) Uniform result straight into a scalar register via v_readlane.
+__device__ int wave_sum_readlane(int row_sum_in_every_lane_of_row) {
+    int v = row_sum_in_every_lane_of_row;
+    return __builtin_amdgcn_readlane(v, 0) + __builtin_amdgcn_readlane(v, 16) +
+           __builtin_amdgcn_readlane(v, 32) + __builtin_amdgcn_readlane(v, 48);
+}
+
+__global__ void reduce_kernel(const int* in, int* out_shfl, int* out_dpp, int* out_rl) {
+    int v = in[blockIdx.x * blockDim.x + threadIdx.x];
+    int a = wave_sum_shfl(v);
+    int b = wave_sum_dpp(v);
+    // row sums only (first four DPP steps), then readlane across the 4 rows
+    int r = v;
+    r += __builtin_amdgcn_update_dpp(0, r, 0xB1, 0xF, 0xF, false);
+    r += __builtin_amdgcn_update_dpp(0, r, 0x4E, 0xF, 0xF, false);
+    r += __builtin_amdgcn_update_dpp(0, r, 0x124, 0xF, 0xF, false);
+    r += __builtin_amdgcn_update_dpp(0, r, 0x128, 0xF, 0xF, false);
+    int c = wave_sum_readlane(r);
+    if (__lane_id() == 0) {
+        int w = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+        out_shfl[w] = a; out_dpp[w] = b; out_rl[w] = c;
+    }
+}
+
+// Wave-aggregated append: one atomic per wave instead of one per lane.
+__global__ void compact_positive(const int* in, int n, int* out, int* counter) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    bool keep = (i < n) && in[i] > 0;
+    unsigned long long mask = __ballot(keep);          // 64 bits on wave64!
+    if (mask == 0) return;
+    unsigned lane = __lane_id();
+    int leader = __ffsll(static_cast<unsigned long long>(mask)) - 1;
+    // Pitfall: (1u << lane) is undefined for lane >= 32. Use a 64-bit literal.
+    unsigned long long lanes_below = (1ull << lane) - 1;   // lanes 0..lane-1
+    int rank = __popcll(mask & lanes_below);
+    int base = 0;
+    if (static_cast<int>(lane) == leader) base = atomicAdd(counter, __popcll(mask));
+    base = __shfl(base, leader);
+    if (keep) out[base + rank] = in[i];
+}
+
+int main() {
+    hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+    if (prop.warpSize != 64) { std::printf("needs a wave64 (CDNA) GPU\n"); return 0; }
+
+    const int n = 1 << 16, threads = 256, blocks = n / threads, waves = n / 64;
+    std::vector<int> h(n);
+    for (int i = 0; i < n; ++i) h[i] = (i % 7) - 3;    // mix of +, 0, -
+    int *d_in, *d_a, *d_b, *d_c, *d_out, *d_cnt;
+    HIP_CHECK(hipMalloc(&d_in, n * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_a, waves * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_b, waves * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_c, waves * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_out, n * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_cnt, sizeof(int)));
+    HIP_CHECK(hipMemcpy(d_in, h.data(), n * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_cnt, 0, sizeof(int)));
+
+    reduce_kernel<<<blocks, threads>>>(d_in, d_a, d_b, d_c);
+    compact_positive<<<blocks, threads>>>(d_in, n, d_out, d_cnt);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<int> a(waves), b(waves), c(waves);
+    int cnt = 0;
+    HIP_CHECK(hipMemcpy(a.data(), d_a, waves * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(b.data(), d_b, waves * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(c.data(), d_c, waves * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&cnt, d_cnt, sizeof(int), hipMemcpyDeviceToHost));
+
+    int bad = 0, expect_cnt = 0;
+    for (int w = 0; w < waves; ++w) {
+        int ref = 0;
+        for (int l = 0; l < 64; ++l) ref += h[w * 64 + l];
+        bad += (a[w] != ref) + (b[w] != ref) + (c[w] != ref);
+    }
+    for (int x : h) expect_cnt += x > 0;
+    std::printf("reductions mismatches=%d, compacted=%d (expected %d)\n", bad, cnt, expect_cnt);
+    HIP_CHECK(hipFree(d_in)); HIP_CHECK(hipFree(d_a)); HIP_CHECK(hipFree(d_b));
+    HIP_CHECK(hipFree(d_c)); HIP_CHECK(hipFree(d_out)); HIP_CHECK(hipFree(d_cnt));
+    return (bad == 0 && cnt == expect_cnt) ? 0 : 1;
+}
+```
+
+```text
+$ hipcc -O3 wave_ops.cpp -o wave_ops && ./wave_ops
+reductions mismatches=0, compacted=28086 (expected 28086)
+```
+
+Compiling with `--save-temps --offload-arch=gfx942` and grepping the `.s` file shows the instruction mapping (excerpt; the DPP steps the two reductions share were merged by the compiler):
+
+```text
+v_add_u32_dpp v1, v1, v1 quad_perm:[1,0,3,2] row_mask:0xf bank_mask:0xf bound_ctrl:1   ; lane ^ 1
+v_add_u32_dpp v1, v1, v1 quad_perm:[2,3,0,1] row_mask:0xf bank_mask:0xf bound_ctrl:1   ; lane ^ 2
+v_add_u32_dpp v1, v1, v1 row_ror:4 row_mask:0xf bank_mask:0xf bound_ctrl:1
+v_add_u32_dpp v7, v1, v1 row_ror:8 row_mask:0xf bank_mask:0xf bound_ctrl:1             ; 16-lane row sum
+ds_swizzle_b32 v1, v7 offset:swizzle(SWAP,16)                                          ; lane ^ 16
+ds_bpermute_b32 v4, v6, v3                                                             ; __shfl_xor, lane ^ 32
+v_readlane_b32 s1, v7, 16                                                              ; VGPR lane 16 -> SGPR
+```
+
+Practical advice: use `__shfl_*` or, better, rocPRIM/hipCUB warp primitives ([36.8](#368-hipcub-and-rocprim-block-warp-and-device-primitives)), which already pick DPP sequences per architecture. Hand-write DPP only when a profile shows that the LDS-pipe shuffles (`ds_bpermute`) are the bottleneck, and guard the code by architecture.
+
+## 36.7 Porting Warp32 Code to Wave64: Ballot Masks and Other Traps
+
+| CUDA (warp32) idiom | What breaks on wave64 | Fix |
+|---|---|---|
+| `unsigned m = __ballot_sync(0xffffffff, p);` | The ballot is 64 bits on AMD; storing it in 32 bits silently drops lanes 32-63 | `unsigned long long` / `uint64_t`. HIP's `__ballot` returns 64 bits |
+| `__popc(m)`, `__ffs(m)` | Count or search only the low 32 bits | `__popcll(m)`, `__ffsll(m)` |
+| `1u << lane`, lanemask `(1u << lane) - 1` | **Undefined behavior** for lane ≥ 32 | `1ull << lane`, `(1ull << lane) - 1` |
+| Full mask `0xffffffff` in `__shfl_sync` | HIP's `_sync` builtins `static_assert` that the mask is 64-bit, so a 32-bit literal fails to compile. A cast mask means "lanes 0-31 only" | `0xffffffffffffffffull` or `__activemask()`. On ROCm 6.2-6.4 these builtins are opt-in: define `HIP_ENABLE_WARP_SYNC_BUILTINS` before including any HIP header, otherwise a hipified `__shfl_sync` fails as an undeclared identifier rather than on the mask `static_assert`. From 7.0 they are on by default (disable with `HIP_DISABLE_WARP_SYNC_BUILTINS`) |
+| `lane = threadIdx.x & 31`, `warp = threadIdx.x >> 5` | Wrong lane and wave ids | `__lane_id()`, `threadIdx.x / warpSize` |
+| Shuffle reduction with offsets 16, 8, 4, 2, 1 | Reduces only 32 lanes, leaving two partial sums per wave | Start at `warpSize / 2` |
+| `__shared__ float partial[32]` sized "blockDim / 32" | Wrong index math if the code assumes 32 lanes | Size by `blockDim / 32` (an upper bound for both), index by `threadIdx.x / warpSize` |
+| `#define WARP_SIZE 32`, or `warpSize` used as a compile-time constant | Wrong on CDNA. **In ROCm 7.0 `warpSize` is no longer `constexpr`**, and `__AMDGCN_WAVEFRONT_SIZE` is deprecated | Use runtime `warpSize` in device code. For compile-time needs, use a per-target macro (CDNA/gfx9 is wave64) or `rocprim::arch::wavefront::min_size()/max_size()` |
+| `#ifdef __HIP_PLATFORM_AMD__ -> 64` | Wrong on RDNA, which is wave32 by default | Branch on the architecture (gfx9 vs gfx10+), not the platform |
+| Relying on implicit warp-synchronous execution | Works by accident; the compiler may still reorder memory operations | Use explicit primitives. `__syncwarp()` is available by default starting with ROCm 7.0. It belongs to the same warp-sync builtin set, so `HIP_DISABLE_WARP_SYNC_BUILTINS` removes it too. A leftover shim such as `#define __syncwarp __syncthreads` clashes with it on 7.0+ |
+
+The `compact_positive` kernel in 36.6 shows the correct 64-bit pattern: ballot into a 64-bit mask, compute the leader with `__ffsll`, compute this lane's rank with `__popcll(mask & ((1ull << lane) - 1))`, issue one `atomicAdd` per wave, and broadcast the base with `__shfl`. With `1u << lane`, lanes 32-63 compute garbage ranks and the output gets holes and overlapping writes.
+
+## 36.8 hipCUB and rocPRIM: Block, Warp, and Device Primitives
+
+- **rocPRIM** is AMD's native, header-only HIP primitives library. It is tuned per architecture and uses DPP and `ds_bpermute` internally.
+- **hipCUB** is a thin wrapper with the CUB API. On AMD it calls rocPRIM; on NVIDIA it calls CUB. Code written against hipCUB therefore runs on both.
+- **rocThrust** builds on rocPRIM.
+
+| Level | Examples | Scratch |
+|---|---|---|
+| Warp | `WarpReduce`, `WarpScan`, `WarpExchange` (logical warp size: a power of two up to the hardware wave) | `TempStorage` in LDS |
+| Block | `BlockLoad`/`BlockStore` (direct, striped, warp-transpose), `BlockReduce`, `BlockScan`, `BlockRadixSort`, `BlockExchange`, `BlockHistogram` | `TempStorage` in LDS; reuse it through a `union` plus `__syncthreads()` |
+| Device | `DeviceReduce`, `DeviceScan`, `DeviceRadixSort`, `DeviceSelect`, `DeviceSegmentedReduce`, `DeviceHistogram` | Two-phase: call once with `nullptr` to get `temp_bytes`, allocate, call again |
+
+```cpp
+// Block-, warp-, and device-level primitives from hipCUB (CUB API on rocPRIM).
+// Build: hipcc -O3 hipcub_demo.cpp -o hipcub_demo
+#include <hip/hip_runtime.h>
+#include <hipcub/hipcub.hpp>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#define HIP_CHECK(cmd) do { hipError_t e = (cmd); if (e != hipSuccess) { \
+    std::fprintf(stderr, "HIP %s:%d: %s\n", __FILE__, __LINE__, hipGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+constexpr int BLOCK = 256;
+constexpr int ITEMS = 4;                     // items per thread (ILP, fewer blocks)
+constexpr int LOGICAL_WARP = 16;             // sub-wave groups; must divide the HW wave
+
+// Block-wide sum of BLOCK*ITEMS elements; one partial per block.
+__global__ void block_sum(const int* in, int* partials, int n) {
+    using BlockLoad   = hipcub::BlockLoad<int, BLOCK, ITEMS, hipcub::BLOCK_LOAD_WARP_TRANSPOSE>;
+    using BlockReduce = hipcub::BlockReduce<int, BLOCK>;
+    __shared__ union {                       // reuse LDS between the two phases
+        typename BlockLoad::TempStorage load;
+        typename BlockReduce::TempStorage reduce;
+    } tmp;
+    int items[ITEMS];
+    int base = blockIdx.x * BLOCK * ITEMS;
+    BlockLoad(tmp.load).Load(in + base, items, n - base, 0);   // guarded, coalesced
+    __syncthreads();                                           // LDS reuse barrier
+    int s = BlockReduce(tmp.reduce).Sum(items);                // valid in thread 0 only
+    if (threadIdx.x == 0) partials[blockIdx.x] = s;
+}
+
+// Segmented sums of 16 consecutive values with a logical-warp reduction.
+__global__ void sum_groups_of_16(const int* in, int* out) {
+    using WarpReduce = hipcub::WarpReduce<int, LOGICAL_WARP>;
+    __shared__ typename WarpReduce::TempStorage tmp[BLOCK / LOGICAL_WARP];
+    int gid = blockIdx.x * BLOCK + threadIdx.x;
+    int group = threadIdx.x / LOGICAL_WARP;
+    int s = WarpReduce(tmp[group]).Sum(in[gid]);               // valid in lane 0 of group
+    if (threadIdx.x % LOGICAL_WARP == 0) out[gid / LOGICAL_WARP] = s;
+}
+
+int main() {
+    const int n = 1 << 20;
+    std::vector<int> h(n);
+    long long ref = 0;
+    for (int i = 0; i < n; ++i) { h[i] = i % 13; ref += h[i]; }
+
+    int *d_in, *d_part, *d_groups, *d_total;
+    const int nblocks = (n + BLOCK * ITEMS - 1) / (BLOCK * ITEMS);
+    HIP_CHECK(hipMalloc(&d_in, n * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_part, nblocks * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_groups, (n / LOGICAL_WARP) * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_total, sizeof(int)));
+    HIP_CHECK(hipMemcpy(d_in, h.data(), n * sizeof(int), hipMemcpyHostToDevice));
+
+    block_sum<<<nblocks, BLOCK>>>(d_in, d_part, n);
+    sum_groups_of_16<<<n / BLOCK, BLOCK>>>(d_in, d_groups);
+
+    // Device-wide reduce: call once with nullptr to size the scratch, then run.
+    void* d_temp = nullptr;
+    size_t temp_bytes = 0;
+    HIP_CHECK(hipcub::DeviceReduce::Sum(d_temp, temp_bytes, d_part, d_total, nblocks));
+    HIP_CHECK(hipMalloc(&d_temp, temp_bytes));
+    HIP_CHECK(hipcub::DeviceReduce::Sum(d_temp, temp_bytes, d_part, d_total, nblocks));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    int total = 0, g0 = 0;
+    HIP_CHECK(hipMemcpy(&total, d_total, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&g0, d_groups, sizeof(int), hipMemcpyDeviceToHost));
+    int g0_ref = 0;
+    for (int i = 0; i < LOGICAL_WARP; ++i) g0_ref += h[i];
+    std::printf("total=%d ref=%lld  group0=%d ref=%d\n", total, ref, g0, g0_ref);
+
+    HIP_CHECK(hipFree(d_temp)); HIP_CHECK(hipFree(d_in)); HIP_CHECK(hipFree(d_part));
+    HIP_CHECK(hipFree(d_groups)); HIP_CHECK(hipFree(d_total));
+    return (total == ref && g0 == g0_ref) ? 0 : 1;
+}
+```
+
+```text
+$ hipcc -O3 hipcub_demo.cpp -o hipcub_demo && ./hipcub_demo
+total=6291438 ref=6291438  group0=81 ref=81
+```
+
+The native rocPRIM spelling of the block reduction:
+
+```cpp
+// fragment: rocPRIM's native block reduction (default operator: rocprim::plus)
+#include <rocprim/rocprim.hpp>
+using block_reduce = rocprim::block_reduce<int, 256>;
+__shared__ typename block_reduce::storage_type storage;
+int block_total;
+block_reduce().reduce(thread_value, block_total, storage);   // valid in thread 0
+```
+
+Gotchas:
+- Block and warp reductions return the result **only in thread/lane 0**. Use `BlockReduce(...).Sum()` followed by a broadcast through shared memory if every thread needs it, or use `BlockScan`, which gives every thread a result.
+- Reusing `TempStorage` for two collectives needs a `__syncthreads()` between them.
+- The block size is a template parameter and must match the launch.
+- Device-level calls are asynchronous on the given stream (default: the null stream), and their temporary storage must stay alive until the call completes.
+
+## 36.9 Interview Questions -- Portability and Wave-Level Programming
+
+**Q1.** You are starting a new physics code that must run on Frontier (AMD), Aurora (Intel), and an NVIDIA cluster for 10+ years. HIP, SYCL, or Kokkos?
+
+For a large application maintained over a long time, a portability layer such as Kokkos (or RAJA) is usually the best default:
+- It hides the vendor API and the data layout (`View` layouts give coalescing on GPU and cache-friendly order on CPU).
+- It has production backends for all three vendors (HIP, SYCL, CUDA) and is maintained by a national-lab community.
+- Native kernels can still be dropped in for hotspots.
+
+SYCL is reasonable if Intel is the primary system and the team wants an ISO-C++-style standard, but backend maturity on AMD/NVIDIA varies by implementation. Plain HIP covers AMD + NVIDIA well but not Intel. Name the trade-offs: an extra dependency and abstraction overhead (usually small) against the cost of porting three times.
+
+**Q2.** What does `__shfl_xor(v, 1)` compile to on MI300X, and how could it be cheaper?
+
+By default HIP's shuffles lower to `ds_bpermute_b32`. That instruction routes the value through the LDS crossbar with an address of `lane * 4`, costs LDS-pipe latency, and needs `s_waitcnt lgkmcnt`. A fixed xor-1 pattern can instead be a DPP `quad_perm:[1,0,3,2]` modifier on the add instruction itself, which costs essentially nothing extra. The compiler does **not** make this transformation for you: `__shfl_xor` is implemented as a computed-index `__builtin_amdgcn_ds_bpermute`, so even `__shfl_xor(v, 1)` with a constant offset stays a `ds_bpermute_b32` at `-O3` (you can confirm this with `--save-temps`). To get DPP, use rocPRIM/hipCUB warp primitives, which emit DPP sequences explicitly, or the `__builtin_amdgcn_update_dpp` / `__builtin_amdgcn_mov_dpp` builtins. Patterns that cross 16-lane rows need `row_bcast`, `ds_swizzle` (within 32 lanes), `ds_bpermute`, or `readlane`.
+
+**Q3.** A CUDA warp-aggregated atomic gives wrong counts after hipify on MI250X. What do you look for?
+
+Look for 32-bit assumptions:
+- An `unsigned` ballot result, which drops lanes 32-63.
+- `__popc`/`__ffs` instead of `__popcll`/`__ffsll`.
+- `1u << lane` in the lane mask, which is undefined for lane ≥ 32.
+- `threadIdx.x & 31` for the lane id.
+- A `0xffffffff` mask.
+- Shuffle loops that start at offset 16.
+
+Fix all of them with 64-bit types and `warpSize`-relative code, and test on both wave32 and wave64 targets. Check `hipDeviceProp_t::warpSize` at run time.
+
+**Q4.** ROCm 7 made `warpSize` non-constexpr. How do you size a per-wave shared array?
+
+Size it for the worst case: `blockDim / 32` entries is an upper bound for both wave32 and wave64, or use a template parameter for the block size and divide by the minimum wave size. Where a real compile-time wave size is needed, use a per-architecture macro (wave64 on gfx9/CDNA) or rocPRIM's `arch::wavefront::min_size()`/`max_size()`, and keep run-time logic on `warpSize`. Do not assume that `__HIP_PLATFORM_AMD__` implies 64.
+
+**Q5.** Why would Kokkos store a 2-D array column-major on the GPU but row-major on the CPU?
+
+The parallel loop index is usually the first index `i`. On a GPU, consecutive threads have consecutive `i`, so `LayoutLeft` (i is the fastest-varying index) makes a wave's loads contiguous, which means coalesced transactions. On a CPU, each thread handles one `i` and loops over `j`, so `LayoutRight` (j fastest) gives each thread a contiguous stream for its caches and SIMD units. Kokkos picks the default layout per memory space, so the same source gets the right pattern on both.
+
+**Q6.** When is hand-written DPP worth it instead of rocPRIM?
+
+Rarely. It can be worth it when a profile (instruction mix, LDS-pipe utilization in `rocprof-compute`) shows that cross-lane traffic in a hot inner loop dominates, the pattern is fixed, the target architectures are known, and you can maintain separate paths for gfx9 (CDNA) and gfx10+ (RDNA) DPP semantics. Otherwise rocPRIM's warp primitives already use tuned DPP sequences and stay correct across wave sizes.
+
+**Q7.** Map a CUDA programmer's vocabulary to OpenCL and SYCL.
+
+- thread / block / grid = work-item / work-group / NDRange (SYCL: `nd_item` within an `nd_range`).
+- warp = sub-group.
+- shared memory = local memory (`__local`, or a SYCL `local_accessor`).
+- `__syncthreads()` = `barrier(CLK_LOCAL_MEM_FENCE)` or `sycl::group_barrier(g)`.
+- stream = command queue.
+- `cudaMalloc` = `clCreateBuffer` / `sycl::malloc_device`.
+
+AMD's own terminology (workgroup, NDRange, LDS) comes from this OpenCL lineage.
