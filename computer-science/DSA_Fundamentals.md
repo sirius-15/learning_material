@@ -42,6 +42,12 @@
 26. [Which Data Structure Should I Use?](#26-which-data-structure-should-i-use)
 27. [Space-Time Tradeoff Summary](#27-space-time-tradeoff-summary)
 
+### Part 4: Advanced Algorithms
+
+28. [Advanced Graph Algorithms](#28-advanced-graph-algorithms) -- bridges and articulation points, SCC (Tarjan, Kosaraju), Euler paths (Hierholzer), bipartite check, max flow / min cut, bipartite matching
+29. [Number Theory and Modular Arithmetic](#29-number-theory-and-modular-arithmetic) -- GCD/LCM, extended Euclid, modpow, modular inverse, sieve, nCr mod p, overflow-safe arithmetic
+30. [Randomized Algorithms](#30-randomized-algorithms) -- Las Vegas vs Monte Carlo, Fisher-Yates, reservoir sampling, randomized quickselect
+
 ---
 
 # Part 1: Data Structures
@@ -2007,6 +2013,8 @@ public:
 
 ## 10. Tries (Prefix Trees)
 
+> Theory here; problem patterns in [LeetCode_Patterns.md#17-trie-prefix-tree](LeetCode_Patterns.md#17-trie-prefix-tree).
+
 ### Overview
 
 A **trie** (pronounced "try", from re**trie**val) is a tree-like data structure used to store strings where each node represents a character. Shared prefixes share the same path from the root, making tries extremely efficient for prefix-based operations.
@@ -2552,6 +2560,8 @@ The operation `i & (-i)` extracts the **lowest set bit** of i:
 ---
 
 ## 13. Disjoint Set Union (Union-Find)
+
+> Theory here; problem patterns in [LeetCode_Patterns.md#16-union-find-disjoint-set](LeetCode_Patterns.md#16-union-find-disjoint-set).
 
 ### Overview
 
@@ -3496,9 +3506,10 @@ std::vector<int> dfs(const std::vector<std::vector<int>>& graph, int start) {
 | **Cycle detection (directed)** | Node in current recursion stack (gray node) |
 | **Topological sort** | Post-order DFS on DAG, reverse the result |
 | **Connected components** | DFS/BFS from each unvisited node |
-| **Strongly connected components** | Kosaraju's (two-pass DFS) or Tarjan's |
-| **Bipartite check** | 2-color DFS/BFS |
-| **Articulation points / bridges** | Tarjan's algorithm with discovery/low times |
+| **Strongly connected components** | Kosaraju's (two-pass DFS) or Tarjan's -- see [Section 28](#strongly-connected-components-scc) |
+| **Bipartite check** | 2-color DFS/BFS -- see [Section 28](#bipartite-check-bfs-2-coloring) |
+| **Articulation points / bridges** | Tarjan's algorithm with discovery/low times -- see [Section 28](#dfs-discovery-times-and-low-link-values) |
+| **Euler path / circuit** | Hierholzer's post-order DFS -- see [Section 28](#euler-paths-and-circuits-hierholzers-algorithm) |
 
 ### Topological Sort (Kahn's BFS-based)
 
@@ -3538,6 +3549,8 @@ def topological_sort(graph, num_nodes):
 | Course Schedule (LC 207) | Medium | Topological sort / cycle detection |
 | Word Ladder (LC 127) | Hard | BFS shortest path in word graph |
 | Surrounded Regions (LC 130) | Medium | DFS from border O's |
+
+> **Practice these as patterns:** [LeetCode_Patterns.md -- BFS](LeetCode_Patterns.md#7-bfs-breadth-first-search), [LeetCode_Patterns.md -- DFS](LeetCode_Patterns.md#8-dfs-depth-first-search), [LeetCode_Patterns.md -- Topological Sort](LeetCode_Patterns.md#14-topological-sort). Advanced graph algorithms (bridges, SCC, Euler paths, flow, matching) are in [Section 28](#28-advanced-graph-algorithms).
 
 ---
 
@@ -4172,6 +4185,8 @@ def manacher(s):
 
 ## 20. Dynamic Programming
 
+> Theory here; problem patterns in [LeetCode_Patterns.md#18-dynamic-programming](LeetCode_Patterns.md#18-dynamic-programming).
+
 ### Overview
 
 **Dynamic Programming (DP)** solves complex problems by breaking them into overlapping subproblems, solving each subproblem once, and storing results to avoid redundant computation. It applies when a problem has:
@@ -4606,6 +4621,8 @@ def max_subarray_dc(arr, lo, hi):
 
 ## 22. Greedy Algorithms
 
+> Theory here; problem patterns in [LeetCode_Patterns.md#19-greedy](LeetCode_Patterns.md#19-greedy).
+
 ### Overview
 
 A **greedy algorithm** makes the **locally optimal choice** at each step, hoping to find the global optimum. Greedy works when:
@@ -4963,6 +4980,8 @@ def solve_sudoku(board):
 
 ## 24. Bit Manipulation
 
+> Theory here; problem patterns in [LeetCode_Patterns.md#20-bit-manipulation](LeetCode_Patterns.md#20-bit-manipulation).
+
 ### Overview
 
 **Bit manipulation** operates directly on the binary representation of integers using bitwise operators. It enables O(1) tricks for operations that would otherwise require loops or extra space, and is fundamental for bitmask DP, flags, and low-level optimizations.
@@ -5212,7 +5231,12 @@ uint32_t reverseBits(uint32_t n) {
 | **Prim's MST** | O(E log V) | O(V) | MST for dense graphs |
 | **Topological Sort** | O(V + E) | O(V) | DAG ordering, dependency resolution |
 | **Tarjan's SCC** | O(V + E) | O(V) | Strongly connected components |
-| **Kosaraju's SCC** | O(V + E) | O(V) | Strongly connected components |
+| **Kosaraju's SCC** | O(V + E) | O(V + E) | Strongly connected components (needs the transpose graph) |
+| **Bridges / articulation points** | O(V + E) | O(V) | Critical edges/vertices (Tarjan low-link) |
+| **Hierholzer (Euler path)** | O(E) | O(E) | Use every edge exactly once |
+| **Edmonds-Karp max flow** | O(V · E²) | O(V + E) | Max flow / min cut |
+| **Dinic max flow** | O(V² · E) | O(V + E) | Max flow; O(E √V) on unit-capacity bipartite graphs |
+| **Kuhn / Hopcroft-Karp matching** | O(V · E) / O(E √V) | O(V) | Maximum bipartite matching |
 
 ---
 
@@ -5359,6 +5383,1606 @@ Use problem constraints to determine the expected time complexity:
 | Hash table insert | O(n) worst case | **O(1)** amortized | dict, HashMap |
 | Union-Find (find/union) | O(log n) worst case | **O(α(n))** amortized | DSU |
 | Splay tree (all ops) | O(n) worst case | **O(log n)** amortized | Splay tree |
+
+---
+
+# Part 4: Advanced Algorithms
+
+> Part 4 extends Part 2 with topics that come up less often but separate strong candidates: advanced graph algorithms, number theory, and randomized algorithms. Each section ends with interview Q&A.
+
+---
+
+## 28. Advanced Graph Algorithms
+
+### Overview
+
+These algorithms all build on the DFS/BFS machinery from [Section 16](#16-graph-traversals). Interviewers rarely expect you to code max flow from memory, but they do expect you to recognize when a problem *reduces* to one of these, and to code bridges, SCC, Euler paths, and bipartite checks.
+
+| Problem shape | Algorithm | Time | Classic interview problem |
+|---|---|---|---|
+| "Which single edge/node removal disconnects the network?" | Tarjan low-link (bridges / articulation points) | O(V + E) | Critical Connections in a Network (LC 1192) |
+| "Group nodes that can all reach each other" (directed) | Tarjan SCC or Kosaraju | O(V + E) | 2-SAT, cycle condensation, "minimum edges to make strongly connected" |
+| "Use every edge exactly once" | Hierholzer (Euler path/circuit) | O(E) (O(E log E) with lexical order) | Reconstruct Itinerary (LC 332), Valid Arrangement of Pairs (LC 2097), Cracking the Safe (LC 753) |
+| "Split into two groups with no conflict inside a group" | BFS/DFS 2-coloring | O(V + E) | Is Graph Bipartite? (LC 785), Possible Bipartition (LC 886) |
+| "Max throughput / min edges to cut s from t" | Max flow (Edmonds-Karp, Dinic) + min cut | O(V E²) / O(V² E) | Network reliability, project selection, image segmentation |
+| "Assign workers to jobs, one each" | Bipartite matching (Kuhn, Hopcroft-Karp) | O(V E) / O(E √V) | Maximum Students Taking Exam (LC 1349), assignment problems |
+
+> **Practice these as patterns:** graph DFS template in [LeetCode_Patterns.md -- DFS](LeetCode_Patterns.md#8-dfs-depth-first-search), BFS in [LeetCode_Patterns.md -- BFS](LeetCode_Patterns.md#7-bfs-breadth-first-search), DAG ordering in [LeetCode_Patterns.md -- Topological Sort](LeetCode_Patterns.md#14-topological-sort), connectivity in [LeetCode_Patterns.md -- Union Find](LeetCode_Patterns.md#16-union-find-disjoint-set).
+
+### DFS Discovery Times and Low-Link Values
+
+Run a DFS on an **undirected** graph and stamp each vertex with a **discovery time** `disc[u]` (the order in which DFS first reaches it). The DFS classifies every edge as either:
+
+- **Tree edge** `u -> v`: `v` was unvisited when we looked at it, so `v` becomes a child of `u` in the DFS tree.
+- **Back edge** `u -> w`: `w` is already visited and is an *ancestor* of `u`. In an undirected DFS there are no cross edges, so every non-tree edge is a back edge.
+
+The **low-link value** is:
+
+```text
+low[u] = min( disc[u],
+              disc[w]  for every back edge u -> w,
+              low[c]   for every DFS child c of u )
+```
+
+In words: `low[u]` is the earliest-discovered vertex that the subtree rooted at `u` can reach using tree edges downward plus **at most one** back edge upward. If `low[c]` is still large, the subtree under `c` has no "escape route" above `u`.
+
+**Bridge rule.** The tree edge `(u, c)` is a bridge iff `low[c] > disc[u]`. The subtree of `c` cannot reach `u` or anything above it except through that edge.
+
+**Articulation point rules.**
+- A **non-root** `u` is an articulation point iff some child `c` has `low[c] >= disc[u]`. The subtree of `c` can reach `u` but nothing above it, so deleting `u` cuts it off. Note `>=` here versus `>` for bridges: reaching `u` itself is fine for an edge, but not when `u` is the vertex being deleted.
+- The **root** is an articulation point iff it has **2 or more DFS children**. The root has nothing above it, so the low rule does not apply. Two DFS children of the root can only be connected through the root, otherwise DFS would have reached the second child from inside the first subtree.
+
+**Worked example.** Edges: `0-1, 1-2, 2-0, 1-3, 3-4` (a triangle 0-1-2 with a tail 1-3-4). DFS from 0:
+
+```text
+    0           disc/low after DFS
+    |  \        v : disc low  reason
+    1---2       0 :  0    0
+    |           1 :  1    0   child 2 has low 0
+    3           2 :  2    0   back edge 2->0
+    |           3 :  3    3   no back edges in its subtree
+    4           4 :  4    4
+```
+
+- Edge (1,3): `low[3] = 3 > disc[1] = 1`, so it is a **bridge**. Edge (3,4): `low[4] = 4 > disc[3] = 3`, so it is a **bridge**. The triangle edges are not bridges because `low[2] = 0` and `low[1] = 0`.
+- Vertex 1 (non-root): child 3 has `low[3] = 3 >= disc[1] = 1`, so it is an **articulation point**. Vertex 3: child 4 has `low = 4 >= 3`, so it is **also an articulation point**. The root 0 has only one DFS child (1), so it is **not** one.
+
+**Python** -- bridges and articulation points (handles parallel edges and disconnected graphs):
+
+```python
+import sys
+from typing import List, Tuple
+
+
+def bridges_and_articulation_points(n: int, edges: List[Tuple[int, int]]):
+    """Undirected graph on vertices 0..n-1. Returns (bridges, articulation_points)."""
+    adj = [[] for _ in range(n)]
+    for eid, (u, v) in enumerate(edges):
+        adj[u].append((v, eid))
+        adj[v].append((u, eid))
+
+    disc = [-1] * n            # -1 = unvisited
+    low = [0] * n
+    is_ap = [False] * n
+    bridges = []
+    timer = 0
+
+    def dfs(u: int, parent_edge: int) -> None:
+        nonlocal timer
+        disc[u] = low[u] = timer
+        timer += 1
+        children = 0
+        for v, eid in adj[u]:
+            if eid == parent_edge:        # skip the edge we arrived on (by id, not by vertex)
+                continue
+            if disc[v] == -1:             # tree edge
+                children += 1
+                dfs(v, eid)
+                low[u] = min(low[u], low[v])
+                if low[v] > disc[u]:
+                    bridges.append((u, v))
+                if parent_edge != -1 and low[v] >= disc[u]:
+                    is_ap[u] = True
+            else:                         # back edge
+                low[u] = min(low[u], disc[v])
+        if parent_edge == -1 and children >= 2:
+            is_ap[u] = True
+
+    sys.setrecursionlimit(max(10_000, 2 * n + 100))  # deep paths; see the note below
+    for s in range(n):
+        if disc[s] == -1:
+            dfs(s, -1)
+    return bridges, [v for v in range(n) if is_ap[v]]
+
+
+if __name__ == "__main__":
+    b, ap = bridges_and_articulation_points(5, [(0, 1), (1, 2), (2, 0), (1, 3), (3, 4)])
+    print("bridges:", sorted(b))       # bridges: [(1, 3), (3, 4)]
+    print("articulation:", ap)         # articulation: [1, 3]
+    # Parallel edge: (0,1) twice, so neither copy is a bridge
+    print(bridges_and_articulation_points(2, [(0, 1), (0, 1)]))   # ([], [])
+```
+
+**C++** -- same algorithm:
+
+```cpp
+#include <algorithm>
+#include <iostream>
+#include <utility>
+#include <vector>
+
+struct CutFinder {
+    int n, timer = 0;
+    std::vector<std::vector<std::pair<int, int>>> adj;  // (neighbor, edge id)
+    std::vector<int> disc, low;
+    std::vector<bool> isAp;
+    std::vector<std::pair<int, int>> bridges;
+
+    CutFinder(int n, const std::vector<std::pair<int, int>>& edges)
+        : n(n), adj(n), disc(n, -1), low(n, 0), isAp(n, false) {
+        for (int id = 0; id < (int)edges.size(); ++id) {
+            auto [u, v] = edges[id];
+            adj[u].push_back({v, id});
+            adj[v].push_back({u, id});
+        }
+        for (int s = 0; s < n; ++s)
+            if (disc[s] == -1) dfs(s, -1);
+    }
+
+    void dfs(int u, int parentEdge) {
+        disc[u] = low[u] = timer++;
+        int children = 0;
+        for (auto [v, id] : adj[u]) {
+            if (id == parentEdge) continue;
+            if (disc[v] == -1) {
+                ++children;
+                dfs(v, id);
+                low[u] = std::min(low[u], low[v]);
+                if (low[v] > disc[u]) bridges.push_back({u, v});
+                if (parentEdge != -1 && low[v] >= disc[u]) isAp[u] = true;
+            } else {
+                low[u] = std::min(low[u], disc[v]);
+            }
+        }
+        if (parentEdge == -1 && children >= 2) isAp[u] = true;
+    }
+};
+
+int main() {
+    CutFinder cf(5, {{0, 1}, {1, 2}, {2, 0}, {1, 3}, {3, 4}});
+    std::sort(cf.bridges.begin(), cf.bridges.end());
+    for (auto [u, v] : cf.bridges) std::cout << "bridge " << u << "-" << v << "\n";
+    for (int v = 0; v < cf.n; ++v)
+        if (cf.isAp[v]) std::cout << "articulation " << v << "\n";
+    // bridge 1-3, bridge 3-4, articulation 1, articulation 3
+}
+```
+
+**Pitfalls**
+
+- **Skip the parent edge by id, not the parent vertex.** If you skip `v == parent`, a doubled edge `u=v` looks like a bridge even though removing one copy leaves the other.
+- **Use `disc[w]`, not `low[w]`, for back edges.** Using `low[w]` still finds bridges correctly, but it can report wrong articulation points. `low[w]` may point above `w` through a path that itself passes through `u`. Using `disc[w]` is the textbook form, and it is always correct.
+- **Recursion depth.** A path graph with 10^5 vertices recurses 10^5 deep. In Python, raise the limit (and for very deep graphs, run inside `threading.Thread` with a bigger `threading.stack_size`) or convert to an iterative DFS with an explicit stack of `(u, parent_edge, iterator)`. In C++, the default 8 MB stack usually handles about 10^5 frames, but 10^6 needs an iterative version.
+- **LC 1192 (Critical Connections)** asks exactly for bridges. Return `[u, v]` pairs in any order.
+
+### Strongly Connected Components (SCC)
+
+In a **directed** graph, an SCC is a maximal set of vertices where every vertex can reach every other. Collapsing each SCC to one node gives the **condensation**, which is always a **DAG**. Many problems become "topological sort on the condensation" (2-SAT, "minimum edges to add so the graph is strongly connected" = `max(#sources, #sinks)` of the condensation, unless it is already one SCC).
+
+#### Tarjan's SCC (one DFS pass)
+
+Same `disc`/`low` idea, plus an explicit stack of vertices that are "still open":
+
+1. On entering `u`: set `disc[u] = low[u] = timer++`, then push `u` and mark it `on_stack`.
+2. For each edge `u -> v`: if `v` is unvisited, recurse and set `low[u] = min(low[u], low[v])`. Else if `v` is **on the stack** (same SCC still being built), set `low[u] = min(low[u], disc[v])`. If `v` is visited but **not** on the stack, it belongs to an SCC that is already finished, so **ignore it**. That edge is a cross edge into a completed component.
+3. After processing all edges: if `low[u] == disc[u]`, `u` is the **root** of an SCC. Pop the stack down to and including `u`; those vertices form one SCC.
+
+Tarjan emits SCCs in **reverse topological order** of the condensation (sinks first).
+
+#### Kosaraju's SCC (two DFS passes)
+
+1. DFS the graph and record vertices in order of **finish time**.
+2. Build the **transpose** graph (reverse every edge).
+3. Process vertices in **decreasing finish time**. Each DFS on the transpose from an unassigned vertex collects exactly one SCC.
+
+**Why it works.** The vertex that finishes last lies in a **source** SCC of the condensation. In the transpose, that SCC becomes a **sink**, so a DFS started there cannot leak into any other component. Remove it, and the next-highest finish time lies in a source of what remains, and so on by induction. Kosaraju emits SCCs in **topological order** (sources first).
+
+| | Tarjan | Kosaraju |
+|---|---|---|
+| DFS passes | 1 | 2 (plus the transpose) |
+| Extra memory | stack + `on_stack` + `low` | transpose graph (O(V+E)) |
+| Output order | reverse topological | topological |
+| Ease of getting right | trickier (`on_stack` check) | simpler to reason about |
+| Iterative version | awkward | easy (shown below) |
+
+**Python** -- Tarjan (recursive) and Kosaraju (fully iterative):
+
+```python
+import sys
+from typing import List
+
+
+def tarjan_scc(n: int, adj: List[List[int]]) -> List[List[int]]:
+    sys.setrecursionlimit(max(10_000, 2 * n + 100))
+    disc, low = [-1] * n, [0] * n
+    on_stack = [False] * n
+    stack, sccs = [], []
+    timer = 0
+
+    def dfs(u: int) -> None:
+        nonlocal timer
+        disc[u] = low[u] = timer
+        timer += 1
+        stack.append(u)
+        on_stack[u] = True
+        for v in adj[u]:
+            if disc[v] == -1:
+                dfs(v)
+                low[u] = min(low[u], low[v])
+            elif on_stack[v]:
+                low[u] = min(low[u], disc[v])
+        if low[u] == disc[u]:              # u is the root of an SCC
+            comp = []
+            while True:
+                w = stack.pop()
+                on_stack[w] = False
+                comp.append(w)
+                if w == u:
+                    break
+            sccs.append(comp)
+
+    for s in range(n):
+        if disc[s] == -1:
+            dfs(s)
+    return sccs                            # reverse topological order
+
+
+def kosaraju_scc(n: int, adj: List[List[int]]) -> List[List[int]]:
+    # Pass 1: iterative DFS, record finish order
+    visited, order = [False] * n, []
+    for s in range(n):
+        if visited[s]:
+            continue
+        visited[s] = True
+        stack = [(s, iter(adj[s]))]
+        while stack:
+            u, it = stack[-1]
+            v = next(it, None)
+            if v is None:
+                stack.pop()
+                order.append(u)            # u finished
+            elif not visited[v]:
+                visited[v] = True
+                stack.append((v, iter(adj[v])))
+
+    # Pass 2: DFS on the transpose in decreasing finish time
+    radj = [[] for _ in range(n)]
+    for u in range(n):
+        for v in adj[u]:
+            radj[v].append(u)
+    comp_id, sccs = [-1] * n, []
+    for s in reversed(order):
+        if comp_id[s] != -1:
+            continue
+        cid, members, stack = len(sccs), [s], [s]
+        comp_id[s] = cid
+        while stack:
+            u = stack.pop()
+            for v in radj[u]:
+                if comp_id[v] == -1:
+                    comp_id[v] = cid
+                    members.append(v)
+                    stack.append(v)
+        sccs.append(members)
+    return sccs                            # topological order
+
+
+if __name__ == "__main__":
+    # SCCs: {0,1,2} -> {3,4,5} <- {6,7}
+    adj = [[1], [2], [0, 3], [4], [5], [3], [5, 7], [6]]
+    print(sorted(sorted(c) for c in tarjan_scc(8, adj)))    # [[0, 1, 2], [3, 4, 5], [6, 7]]
+    print(sorted(sorted(c) for c in kosaraju_scc(8, adj)))  # [[0, 1, 2], [3, 4, 5], [6, 7]]
+```
+
+**C++** -- Tarjan:
+
+```cpp
+#include <algorithm>
+#include <iostream>
+#include <vector>
+
+class TarjanSCC {
+public:
+    explicit TarjanSCC(const std::vector<std::vector<int>>& g)
+        : g_(g), disc_(g.size(), -1), low_(g.size(), 0), onStack_(g.size(), false) {
+        for (int s = 0; s < (int)g_.size(); ++s)
+            if (disc_[s] == -1) dfs(s);
+    }
+    const std::vector<std::vector<int>>& components() const { return sccs_; }
+
+private:
+    void dfs(int u) {
+        disc_[u] = low_[u] = timer_++;
+        stk_.push_back(u);
+        onStack_[u] = true;
+        for (int v : g_[u]) {
+            if (disc_[v] == -1) {
+                dfs(v);
+                low_[u] = std::min(low_[u], low_[v]);
+            } else if (onStack_[v]) {
+                low_[u] = std::min(low_[u], disc_[v]);
+            }
+        }
+        if (low_[u] == disc_[u]) {
+            std::vector<int> comp;
+            int w;
+            do {
+                w = stk_.back();
+                stk_.pop_back();
+                onStack_[w] = false;
+                comp.push_back(w);
+            } while (w != u);
+            sccs_.push_back(std::move(comp));
+        }
+    }
+
+    const std::vector<std::vector<int>>& g_;
+    std::vector<int> disc_, low_, stk_;
+    std::vector<bool> onStack_;
+    std::vector<std::vector<int>> sccs_;
+    int timer_ = 0;
+};
+
+int main() {
+    std::vector<std::vector<int>> g = {{1}, {2}, {0, 3}, {4}, {5}, {3}, {5, 7}, {6}};
+    TarjanSCC t(g);
+    for (auto comp : t.components()) {
+        std::sort(comp.begin(), comp.end());
+        for (int v : comp) std::cout << v << ' ';
+        std::cout << '\n';
+    }
+    // Output (sinks first): "3 4 5", "0 1 2", "6 7"
+}
+```
+
+### Euler Paths and Circuits (Hierholzer's Algorithm)
+
+An **Euler path** uses every **edge** exactly once. An **Euler circuit** is an Euler path that starts and ends at the same vertex. (Contrast a **Hamiltonian** path, which visits every **vertex** once. That problem is NP-complete; Euler is linear.)
+
+**Existence conditions** (the non-zero-degree vertices must also be connected; weakly connected for directed graphs):
+
+| Graph | Euler circuit | Euler path (not circuit) |
+|---|---|---|
+| Undirected | every vertex has even degree | exactly 2 odd-degree vertices; start at one of them |
+| Directed | `in == out` for every vertex | exactly one vertex with `out - in = 1` (start) and one with `in - out = 1` (end); all others balanced |
+
+**Why naive DFS fails.** Greedily walking unused edges can get stuck at a dead end before all edges are used. Example: tickets `JFK->KUL, JFK->NRT, NRT->JFK`. Taking the lexicographically smallest edge first goes `JFK->KUL` and gets stuck.
+
+**Hierholzer's idea.** Walk until stuck. The stuck vertex must be the end of the path (or of a sub-circuit), so **emit it in post-order**. Then backtrack and splice in detours from earlier vertices that still have unused edges. The post-order sequence, reversed, is the Euler path. Each edge is pushed and popped once, so the time is **O(E)**.
+
+```text
+JFK -> KUL (stuck: emit KUL)     route (post-order): KUL
+back at JFK -> NRT -> JFK (stuck) route: KUL, JFK, NRT, JFK
+reverse                           JFK, NRT, JFK, KUL
+```
+
+**Python** -- generic directed Euler path, and Reconstruct Itinerary (LC 332):
+
+```python
+from collections import defaultdict
+from typing import Dict, List, Optional
+
+
+def euler_path_directed(n: int, edges: List[tuple]) -> Optional[List[int]]:
+    """Return a vertex sequence using every edge once, or None if impossible."""
+    adj: Dict[int, List[int]] = defaultdict(list)
+    indeg, outdeg = [0] * n, [0] * n
+    for u, v in edges:
+        adj[u].append(v)
+        outdeg[u] += 1
+        indeg[v] += 1
+
+    start = next((u for u in range(n) if outdeg[u] > 0), 0)
+    starts = ends = 0
+    for u in range(n):
+        d = outdeg[u] - indeg[u]
+        if d == 1:
+            starts += 1
+            start = u
+        elif d == -1:
+            ends += 1
+        elif d != 0:
+            return None
+    if not ((starts == 0 and ends == 0) or (starts == 1 and ends == 1)):
+        return None
+
+    path, stack = [], [start]
+    while stack:
+        u = stack[-1]
+        if adj[u]:
+            stack.append(adj[u].pop())   # follow an unused edge
+        else:
+            path.append(stack.pop())     # dead end: emit in post-order
+    path.reverse()
+    return path if len(path) == len(edges) + 1 else None   # +1 check = connectivity
+
+
+def find_itinerary(tickets: List[List[str]]) -> List[str]:
+    """LC 332: lexicographically smallest itinerary using all tickets, starting at JFK."""
+    graph: Dict[str, List[str]] = defaultdict(list)
+    for src, dst in sorted(tickets, reverse=True):
+        graph[src].append(dst)           # reverse-sorted, so pop() yields the smallest
+    route, stack = [], ["JFK"]
+    while stack:
+        while graph[stack[-1]]:
+            stack.append(graph[stack[-1]].pop())
+        route.append(stack.pop())
+    return route[::-1]
+
+
+if __name__ == "__main__":
+    print(euler_path_directed(4, [(0, 1), (1, 2), (2, 0), (0, 3)]))  # [0, 1, 2, 0, 3]
+    print(euler_path_directed(3, [(0, 1), (0, 2)]))                  # None
+    print(find_itinerary([["JFK", "KUL"], ["JFK", "NRT"], ["NRT", "JFK"]]))
+    # ['JFK', 'NRT', 'JFK', 'KUL']
+    print(find_itinerary([["JFK", "SFO"], ["JFK", "ATL"], ["SFO", "ATL"],
+                          ["ATL", "JFK"], ["ATL", "SFO"]]))
+    # ['JFK', 'ATL', 'JFK', 'SFO', 'ATL', 'SFO']
+```
+
+**C++** -- Reconstruct Itinerary:
+
+```cpp
+#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+std::vector<std::string> findItinerary(std::vector<std::vector<std::string>> tickets) {
+    std::unordered_map<std::string, std::vector<std::string>> g;
+    std::sort(tickets.begin(), tickets.end(), std::greater<>());
+    for (auto& t : tickets) g[t[0]].push_back(t[1]);  // descending, so back() is smallest
+
+    std::vector<std::string> route, stk{"JFK"};
+    while (!stk.empty()) {
+        auto& out = g[stk.back()];
+        if (!out.empty()) {
+            std::string next = std::move(out.back());
+            out.pop_back();
+            stk.push_back(std::move(next));
+        } else {
+            route.push_back(stk.back());
+            stk.pop_back();
+        }
+    }
+    std::reverse(route.begin(), route.end());
+    return route;
+}
+
+int main() {
+    for (const auto& s : findItinerary({{"JFK", "KUL"}, {"JFK", "NRT"}, {"NRT", "JFK"}}))
+        std::cout << s << ' ';
+    std::cout << '\n';  // JFK NRT JFK KUL
+}
+```
+
+**Undirected graphs.** Each edge appears in two adjacency lists, so keep a `used[edge_id]` array and skip used edges. Also keep a per-vertex pointer into its adjacency list (instead of rescanning) to stay O(E).
+
+### Bipartite Check (BFS 2-Coloring)
+
+A graph is **bipartite** iff its vertices can be 2-colored so that every edge joins different colors, which holds iff it has **no odd-length cycle**. BFS colors each component by level parity. An edge between two same-colored vertices joins two vertices at the same BFS depth, which closes an odd cycle. Remember to start a BFS from **every** uncolored vertex, because the graph may be disconnected.
+
+**Python** -- Is Graph Bipartite? (LC 785):
+
+```python
+from collections import deque
+from typing import List
+
+
+def is_bipartite(graph: List[List[int]]) -> bool:
+    color = [-1] * len(graph)
+    for s in range(len(graph)):
+        if color[s] != -1:
+            continue
+        color[s] = 0
+        q = deque([s])
+        while q:
+            u = q.popleft()
+            for v in graph[u]:
+                if color[v] == -1:
+                    color[v] = color[u] ^ 1
+                    q.append(v)
+                elif color[v] == color[u]:
+                    return False           # odd cycle found
+    return True
+
+
+if __name__ == "__main__":
+    print(is_bipartite([[1, 3], [0, 2], [1, 3], [0, 2]]))         # True  (4-cycle)
+    print(is_bipartite([[1, 2, 3], [0, 2], [0, 1, 3], [0, 2]]))   # False (triangle 0-1-2)
+```
+
+**C++**:
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <vector>
+
+bool isBipartite(const std::vector<std::vector<int>>& graph) {
+    std::vector<int> color(graph.size(), -1);
+    for (int s = 0; s < (int)graph.size(); ++s) {
+        if (color[s] != -1) continue;
+        color[s] = 0;
+        std::queue<int> q;
+        q.push(s);
+        while (!q.empty()) {
+            int u = q.front(); q.pop();
+            for (int v : graph[u]) {
+                if (color[v] == -1) { color[v] = color[u] ^ 1; q.push(v); }
+                else if (color[v] == color[u]) return false;
+            }
+        }
+    }
+    return true;
+}
+
+int main() {
+    std::cout << std::boolalpha
+              << isBipartite({{1, 3}, {0, 2}, {1, 3}, {0, 2}}) << ' '         // true
+              << isBipartite({{1, 2, 3}, {0, 2}, {0, 1, 3}, {0, 2}}) << '\n'; // false
+}
+```
+
+**Alternative.** With Union-Find, for every vertex `u` union all of its neighbors together, and fail if `find(u) == find(neighbor)`. It needs the full adjacency list. For edges that arrive online, use a DSU with parity (or the 2n-node trick: for edge (u,v), `union(u, v+n)` and `union(v, u+n)`, and fail if `find(u) == find(v)`).
+
+### Maximum Flow and Minimum Cut
+
+**Setup.** A directed graph with capacities `c(u,v) >= 0`, a source `s`, and a sink `t`. A **flow** must satisfy capacity (`0 <= f(u,v) <= c(u,v)`) and conservation (inflow = outflow at every vertex except `s`, `t`). The goal is to maximize the flow out of `s`.
+
+**Residual graph.** For each edge with flow `f`, the residual graph has a forward edge with remaining capacity `c - f` and a **reverse edge** with capacity `f`. The reverse edge lets a later augmenting path *undo* an earlier bad routing decision. This is why the greedy "push along any path" approach fails without residual edges.
+
+**Ford-Fulkerson method.** While there is an `s -> t` path in the residual graph (an **augmenting path**), push the bottleneck capacity along it. With integer capacities this terminates in at most `|f*|` iterations, so it runs in **`O(E · |f*|)`**. That is pseudo-polynomial, and with irrational capacities and bad path choices it may not terminate at all.
+
+| Algorithm | Path choice | Time | Notes |
+|---|---|---|---|
+| Ford-Fulkerson (DFS) | any augmenting path | O(E · \|f*\|) | integer capacities only |
+| **Edmonds-Karp** | **shortest** path (BFS) | **O(V · E²)** | simple; at most O(VE) augmentations because BFS distances never decrease |
+| **Dinic** | blocking flow on BFS level graph | **O(V² · E)**; O(E √V) on unit-capacity bipartite graphs | the competitive-programming default |
+| Push-relabel | local pushes, no paths | O(V² √E) (highest-label) | best in practice for dense graphs |
+
+**Max-flow min-cut theorem.** An **s-t cut** `(S, T)` partitions the vertices with `s ∈ S` and `t ∈ T`. Its capacity is the sum of `c(u,v)` over edges from `S` to `T`. The theorem: **max flow value = min cut capacity**. To **recover a min cut** after max flow, let `S` be the set of vertices reachable from `s` in the final residual graph. The saturated original edges from `S` to `T` form the min cut.
+
+**Worked example** (the CLRS network; vertices `s=0, v1=1, v2=2, v3=3, v4=4, t=5`):
+
+```text
+s->v1 16   s->v2 13   v2->v1 4   v1->v3 12   v3->v2 9
+v2->v4 14  v4->v3 7   v3->t 20   v4->t 4
+Max flow = 23.  Min cut: S = {s, v1, v2, v4}, T = {v3, t}
+Cut edges: v1->v3 (12) + v4->v3 (7) + v4->t (4) = 23
+```
+
+**Python** -- Edmonds-Karp with min-cut recovery:
+
+```python
+from collections import deque
+from typing import List, Tuple
+
+
+class MaxFlow:
+    def __init__(self, n: int):
+        self.n = n
+        self.graph: List[List[int]] = [[] for _ in range(n)]  # edge indices
+        self.to: List[int] = []
+        self.cap: List[int] = []            # residual capacity
+
+    def add_edge(self, u: int, v: int, c: int) -> None:
+        # Edge i and its reverse i^1 are stored adjacently.
+        self.graph[u].append(len(self.to)); self.to.append(v); self.cap.append(c)
+        self.graph[v].append(len(self.to)); self.to.append(u); self.cap.append(0)
+
+    def edmonds_karp(self, s: int, t: int) -> int:
+        flow = 0
+        while True:
+            parent_edge = [-1] * self.n
+            parent_edge[s] = -2
+            q = deque([s])
+            while q and parent_edge[t] == -1:      # BFS = shortest augmenting path
+                u = q.popleft()
+                for e in self.graph[u]:
+                    v = self.to[e]
+                    if self.cap[e] > 0 and parent_edge[v] == -1:
+                        parent_edge[v] = e
+                        q.append(v)
+            if parent_edge[t] == -1:
+                return flow                         # no augmenting path left
+            bottleneck, v = float("inf"), t         # find the bottleneck
+            while v != s:
+                e = parent_edge[v]
+                bottleneck = min(bottleneck, self.cap[e])
+                v = self.to[e ^ 1]
+            v = t                                   # augment
+            while v != s:
+                e = parent_edge[v]
+                self.cap[e] -= bottleneck
+                self.cap[e ^ 1] += bottleneck
+                v = self.to[e ^ 1]
+            flow += bottleneck
+
+    def min_cut_side(self, s: int) -> List[bool]:
+        """After max flow: True for vertices reachable from s in the residual graph."""
+        seen = [False] * self.n
+        seen[s] = True
+        stack = [s]
+        while stack:
+            u = stack.pop()
+            for e in self.graph[u]:
+                if self.cap[e] > 0 and not seen[self.to[e]]:
+                    seen[self.to[e]] = True
+                    stack.append(self.to[e])
+        return seen
+
+
+if __name__ == "__main__":
+    edges: List[Tuple[int, int, int]] = [(0, 1, 16), (0, 2, 13), (2, 1, 4), (1, 3, 12), (3, 2, 9),
+                                         (2, 4, 14), (4, 3, 7), (3, 5, 20), (4, 5, 4)]
+    mf = MaxFlow(6)
+    for u, v, c in edges:
+        mf.add_edge(u, v, c)
+    print("max flow:", mf.edmonds_karp(0, 5))                     # max flow: 23
+    S = mf.min_cut_side(0)
+    print("S side:", [v for v in range(6) if S[v]])               # S side: [0, 1, 2, 4]
+    print("cut edges:", [(u, v, c) for u, v, c in edges if S[u] and not S[v]])
+    # cut edges: [(1, 3, 12), (4, 3, 7), (4, 5, 4)]
+```
+
+**C++** -- Dinic (BFS level graph + DFS blocking flow with a current-arc pointer):
+
+```cpp
+#include <algorithm>
+#include <climits>
+#include <iostream>
+#include <queue>
+#include <vector>
+
+class Dinic {
+    struct Edge { int to; long long cap; };
+    std::vector<Edge> edges_;                 // edge i and its reverse i^1
+    std::vector<std::vector<int>> g_;
+    std::vector<int> level_, it_;
+
+    bool bfs(int s, int t) {
+        std::fill(level_.begin(), level_.end(), -1);
+        level_[s] = 0;
+        std::queue<int> q;
+        q.push(s);
+        while (!q.empty()) {
+            int u = q.front(); q.pop();
+            for (int e : g_[u])
+                if (edges_[e].cap > 0 && level_[edges_[e].to] == -1) {
+                    level_[edges_[e].to] = level_[u] + 1;
+                    q.push(edges_[e].to);
+                }
+        }
+        return level_[t] != -1;
+    }
+
+    long long dfs(int u, int t, long long pushed) {
+        if (u == t) return pushed;
+        for (int& i = it_[u]; i < (int)g_[u].size(); ++i) {   // current-arc optimization
+            int e = g_[u][i];
+            int v = edges_[e].to;
+            if (edges_[e].cap > 0 && level_[v] == level_[u] + 1) {
+                long long got = dfs(v, t, std::min(pushed, edges_[e].cap));
+                if (got > 0) {
+                    edges_[e].cap -= got;
+                    edges_[e ^ 1].cap += got;
+                    return got;
+                }
+            }
+        }
+        return 0;
+    }
+
+public:
+    explicit Dinic(int n) : g_(n), level_(n), it_(n) {}
+
+    void addEdge(int u, int v, long long cap) {
+        g_[u].push_back((int)edges_.size()); edges_.push_back({v, cap});
+        g_[v].push_back((int)edges_.size()); edges_.push_back({u, 0});
+    }
+
+    long long maxFlow(int s, int t) {
+        long long flow = 0;
+        while (bfs(s, t)) {
+            std::fill(it_.begin(), it_.end(), 0);
+            while (long long f = dfs(s, t, LLONG_MAX)) flow += f;
+        }
+        return flow;
+    }
+};
+
+int main() {
+    Dinic d(6);
+    int e[][3] = {{0, 1, 16}, {0, 2, 13}, {2, 1, 4}, {1, 3, 12}, {3, 2, 9},
+                  {2, 4, 14}, {4, 3, 7}, {3, 5, 20}, {4, 5, 4}};
+    for (auto& x : e) d.addEdge(x[0], x[1], x[2]);
+    std::cout << "max flow = " << d.maxFlow(0, 5) << '\n';   // max flow = 23
+}
+```
+
+**Common reductions** (the part interviewers actually test):
+
+| Problem | Reduction |
+|---|---|
+| Max bipartite matching | `s -> each left` (cap 1), `left -> right` (cap 1), `each right -> t` (cap 1) |
+| Max number of edge-disjoint `s-t` paths | every edge cap 1; answer = max flow (Menger's theorem) |
+| Vertex-disjoint paths / vertex capacities | split `v` into `v_in -> v_out` with cap = vertex capacity |
+| Multiple sources/sinks | super-source `S -> each source`, `each sink -> T` with cap ∞ |
+| Project selection (profit vs prerequisites) | profit p: `s -> project` cap p; cost c: `project -> t` cap c; dependency: cap ∞; answer = Σ positive profits − min cut |
+| Min edges to delete to disconnect s, t | unit capacities; answer = min cut |
+
+### Bipartite Matching (Kuhn's Algorithm, Hopcroft-Karp)
+
+A **matching** is a set of edges with no shared endpoint. An **augmenting path** alternates unmatched/matched edges and starts and ends at **free** vertices. Flipping it grows the matching by one. **Berge's theorem:** a matching is maximum iff no augmenting path exists.
+
+**Kuhn's algorithm.** For each left vertex, DFS for an augmenting path. A right vertex `r` is usable if it is free, or if its current partner can be re-matched elsewhere. The `visited` set is reset per left vertex. Time **O(V · E)**, short to write, and enough for V up to a few thousand.
+
+**Hopcroft-Karp.** Each phase does a BFS from **all** free left vertices to build layers, then a DFS that finds a **maximal set of vertex-disjoint shortest** augmenting paths. Only O(√V) phases are needed, so the total is **O(E √V)**. This equals Dinic on the unit-capacity flow network above.
+
+**König's theorem.** In a **bipartite** graph, max matching size = min vertex cover size. So max independent set = V − max matching. This turns "place as many non-conflicting items as possible" problems (LC 1349 Maximum Students Taking Exam) into matching.
+
+**Weighted assignment** (min-cost perfect matching) uses the **Hungarian algorithm**, O(n³). In Python, `scipy.optimize.linear_sum_assignment` does this. Know the name and complexity; do not code it in an interview.
+
+**Python** -- Kuhn's algorithm:
+
+```python
+from typing import List
+
+
+def max_bipartite_matching(n_left: int, n_right: int, adj: List[List[int]]):
+    """adj[l] = right vertices adjacent to left vertex l. Returns (size, match_right)."""
+    match_right = [-1] * n_right                # match_right[r] = left partner or -1
+
+    def try_augment(l: int, visited: List[bool]) -> bool:
+        for r in adj[l]:
+            if visited[r]:
+                continue
+            visited[r] = True
+            # r is free, or r's partner can move to another right vertex
+            if match_right[r] == -1 or try_augment(match_right[r], visited):
+                match_right[r] = l
+                return True
+        return False
+
+    size = 0
+    for l in range(n_left):
+        if try_augment(l, [False] * n_right):
+            size += 1
+    return size, match_right
+
+
+if __name__ == "__main__":
+    # Workers 0..3, jobs 0..3; worker 0 can do jobs 0,1; worker 1 only job 0; etc.
+    adj = [[0, 1], [0], [1, 2], [2]]
+    print(max_bipartite_matching(4, 4, adj))    # (3, [1, 0, 2, -1]): worker 3 stays unmatched
+```
+
+**C++** -- Kuhn's algorithm:
+
+```cpp
+#include <algorithm>
+#include <iostream>
+#include <utility>
+#include <vector>
+
+class Kuhn {
+public:
+    Kuhn(int nLeft, int nRight, std::vector<std::vector<int>> adj)
+        : adj_(std::move(adj)), matchRight_(nRight, -1), visited_(nRight) {
+        for (int l = 0; l < nLeft; ++l) {
+            std::fill(visited_.begin(), visited_.end(), false);
+            if (augment(l)) ++size_;
+        }
+    }
+    int size() const { return size_; }
+
+private:
+    bool augment(int l) {
+        for (int r : adj_[l]) {
+            if (visited_[r]) continue;
+            visited_[r] = true;
+            if (matchRight_[r] == -1 || augment(matchRight_[r])) {
+                matchRight_[r] = l;
+                return true;
+            }
+        }
+        return false;
+    }
+    std::vector<std::vector<int>> adj_;
+    std::vector<int> matchRight_;
+    std::vector<bool> visited_;
+    int size_ = 0;
+};
+
+int main() {
+    Kuhn k(4, 4, {{0, 1}, {0}, {1, 2}, {2}});
+    std::cout << "max matching = " << k.size() << '\n';   // max matching = 3
+}
+```
+
+**Kuhn heuristic.** First do a greedy pass that matches each left vertex to any free neighbor, then run augmenting DFS only for the unmatched ones. This often gives a large constant-factor speedup.
+
+### Complexity Summary
+
+| Algorithm | Time | Space | Graph type |
+|---|---|---|---|
+| Bridges / articulation points (Tarjan) | O(V + E) | O(V) | undirected |
+| Tarjan SCC | O(V + E) | O(V) | directed |
+| Kosaraju SCC | O(V + E) | O(V + E) (transpose) | directed |
+| Hierholzer Euler path | O(E) (O(E log E) for lexicographic order) | O(E) | both |
+| Bipartite check | O(V + E) | O(V) | undirected |
+| Edmonds-Karp | O(V E²) | O(V + E) | directed, capacities |
+| Dinic | O(V² E); O(E √V) unit bipartite | O(V + E) | directed, capacities |
+| Kuhn matching | O(V E) | O(V) | bipartite |
+| Hopcroft-Karp | O(E √V) | O(V) | bipartite |
+| Hungarian | O(n³) | O(n²) | weighted bipartite |
+
+### Key Interview Problems
+
+| Problem | Difficulty | Core Idea |
+|---|---|---|
+| Critical Connections in a Network (LC 1192) | Hard | Bridges via `low[v] > disc[u]` |
+| Reconstruct Itinerary (LC 332) | Hard | Hierholzer, min-lexical via sorted adjacency |
+| Valid Arrangement of Pairs (LC 2097) | Hard | Directed Euler path; start at `out - in = 1` |
+| Cracking the Safe (LC 753) | Hard | Euler circuit on a de Bruijn graph |
+| Is Graph Bipartite? (LC 785) | Medium | BFS 2-coloring over all components |
+| Possible Bipartition (LC 886) | Medium | Build graph from dislikes, then 2-color |
+| Minimum Number of Days to Disconnect Island (LC 1568) | Hard | Answer is 0, 1 (articulation cell), or 2 |
+| Maximum Students Taking Exam (LC 1349) | Hard | Bitmask DP, or König / max independent set |
+
+**See also:** [Section 16 -- DFS Applications](#dfs-applications) · [Section 13 -- Union-Find](#13-disjoint-set-union-union-find) · [LeetCode_Patterns.md -- DFS](LeetCode_Patterns.md#8-dfs-depth-first-search) · [Coding_Problem_List.md](../practice/Coding_Problem_List.md)
+
+### Interview Q&A
+
+**Q1.** Explain what `low[u]` means and why the bridge test is `low[v] > disc[u]` while the articulation-point test is `low[v] >= disc[u]`.
+
+**A.** `low[u]` is the smallest discovery time reachable from `u`'s DFS subtree using tree edges plus at most one back edge. For the tree edge `(u, v)`: if `low[v] > disc[u]`, nothing in `v`'s subtree reaches `u` or above except through that edge, so removing the edge disconnects it and the edge is a bridge. For the vertex `u`: if `low[v] >= disc[u]`, the subtree can reach **at most `u` itself**. Deleting `u` deletes that back route too, so `u` is a cut vertex (`=` counts). The root is special: it is a cut vertex iff it has two or more DFS children, since nothing lies above it.
+
+**Q2.** Why skip the parent *edge* rather than the parent *vertex* in the bridge DFS?
+
+**A.** Because of multi-edges. With two parallel edges `u=v`, the second copy is a genuine back edge that keeps `low[v] <= disc[u]`, so neither copy is a bridge. Skipping by vertex ignores the second copy and wrongly reports a bridge. Skipping by edge id handles it.
+
+**Q3.** Tarjan or Kosaraju -- which would you code in an interview, and what does each give you for free?
+
+**A.** Kosaraju is easier to get right and to make iterative (two plain DFSs plus a transpose). It emits SCCs in topological order of the condensation. Tarjan needs one pass and no transpose, which saves O(V+E) memory, and it emits SCCs in **reverse** topological order. That order is exactly what 2-SAT needs: a variable is true iff `comp[x] < comp[not x]` in Tarjan numbering. The classic Tarjan bug is updating `low` from a visited vertex that is **not** on the stack. That vertex is a finished SCC and must be ignored.
+
+**Q4.** Why does Hierholzer append vertices in post-order and then reverse?
+
+**A.** A vertex is appended only when it has no unused out-edges, which means it is the **end** of whatever remains of the trail. Sub-circuits discovered later while backtracking are spliced *before* that end. Reversing the post-order turns "ends first" into a valid forward path. A pre-order (greedy) walk can commit to a dead end too early. The algorithm is O(E) because each edge is pushed and popped exactly once. For LC 332 you also need lexicographic order, so you sort the adjacency lists, for O(E log E) total.
+
+**Q5.** State the max-flow min-cut theorem and how you'd find the actual cut edges. Why does Edmonds-Karp use BFS?
+
+**A.** The maximum `s-t` flow value equals the minimum capacity over all `s-t` cuts. After the algorithm terminates, BFS/DFS from `s` in the residual graph. The reachable set is `S`, and the original edges from `S` to `V \ S` are saturated and form a min cut. BFS picks **shortest** augmenting paths. That guarantees residual distances from `s` never decrease and each edge becomes the bottleneck O(V) times, which bounds augmentations at O(VE) and total time at O(VE²), independent of capacity values. Plain DFS-based Ford-Fulkerson is `O(E·|f*|)` and can take exponentially many steps on adversarial capacities.
+
+**Q6.** How do you solve maximum bipartite matching, and when would you reach for Hopcroft-Karp?
+
+**A.** Use either augmenting paths directly (Kuhn's DFS, O(VE)) or a unit-capacity max-flow network `s -> L -> R -> t`. Hopcroft-Karp finds many vertex-disjoint shortest augmenting paths per phase. It needs only O(√V) phases, for O(E√V) total. Use it once V·E becomes too large (e.g. V = 10^5, E = 10^6). Common follow-up: König's theorem says min vertex cover = max matching in bipartite graphs, so max independent set = V − matching.
+
+**Q7.** Prove that BFS 2-coloring correctly decides bipartiteness.
+
+**A.** If coloring succeeds, every edge joins opposite colors by construction, so the graph is bipartite. If it fails on edge `(u, v)` with `color[u] == color[v]`, then `dist[u]` and `dist[v]` from the BFS root have the same parity, since BFS distances to adjacent vertices differ by at most 1. Take the BFS tree paths from `u` and `v` up to their lowest common ancestor, plus the edge `(u,v)`. That closed walk has length `(dist[u] − d) + (dist[v] − d) + 1`, which is odd, so it contains an odd cycle, and a graph with an odd cycle is not bipartite.
+
+---
+
+## 29. Number Theory and Modular Arithmetic
+
+### Overview
+
+Math questions show up as "easy" problems with sharp edges: overflow, negative modulo, off-by-one in a sieve, or answers that must be reported "modulo 10^9 + 7". Know these building blocks cold, in both languages.
+
+| Tool | Complexity | Python built-in | C++ built-in |
+|---|---|---|---|
+| GCD / LCM | O(log min(a,b)) | `math.gcd`, `math.lcm` (3.9+) | `std::gcd`, `std::lcm` (`<numeric>`, C++17) |
+| Extended Euclid | O(log min(a,b)) | -- | -- |
+| Fast modular power | O(log e) | `pow(b, e, m)` | -- (write it) |
+| Modular inverse | O(log m) | `pow(a, -1, m)` (3.8+) | -- (write it) |
+| Sieve of Eratosthenes | O(n log log n) | -- | -- |
+| nCr | O(1) per query after O(n) precompute | `math.comb` (exact, 3.8+) | -- |
+| Integer square root | O(log n) | `math.isqrt` (3.8+) | -- (binary search; `std::sqrt` on doubles can be off by one for large values) |
+
+> **Practice these as patterns:** bit tricks in [LeetCode_Patterns.md -- Bit Manipulation](LeetCode_Patterns.md#20-bit-manipulation), binary search on the answer (e.g. `isqrt`) in [LeetCode_Patterns.md -- Modified Binary Search](LeetCode_Patterns.md#11-modified-binary-search), counting DP that needs `mod 1e9+7` in [LeetCode_Patterns.md -- Dynamic Programming](LeetCode_Patterns.md#18-dynamic-programming).
+
+### GCD and LCM (Euclid's Algorithm)
+
+**Key identity:** `gcd(a, b) = gcd(b, a mod b)`, with `gcd(a, 0) = a`. Any common divisor of `a` and `b` divides `a − q·b = a mod b`, and conversely, so both pairs have the same set of common divisors.
+
+```text
+gcd(240, 46):  240 = 5·46 + 10
+                46 = 4·10 + 6
+                10 = 1·6  + 4
+                 6 = 1·4  + 2
+                 4 = 2·2  + 0   ->  gcd = 2
+```
+
+**Complexity.** The remainder at least halves every two steps (`a mod b < a/2` when `b <= a`), giving O(log min(a, b)). The worst case is consecutive Fibonacci numbers (Lamé's theorem).
+
+**LCM:** `lcm(a, b) = a / gcd(a, b) * b`. **Divide first.** `a * b / gcd` can overflow even when the LCM itself fits.
+
+**Extended Euclid** also returns Bezout coefficients `x, y` with `a·x + b·y = gcd(a, b)`. For example, `240·(−9) + 46·47 = 2`. Uses: the modular inverse for non-prime moduli, solving `a·x ≡ c (mod m)` (solvable iff `gcd(a, m) | c`), and the Chinese Remainder Theorem.
+
+### Modular Arithmetic Rules
+
+```text
+(a + b) mod m = ((a mod m) + (b mod m)) mod m
+(a − b) mod m = ((a mod m) − (b mod m) + m) mod m     <- add m before the final mod
+(a · b) mod m = ((a mod m) · (b mod m)) mod m
+(a / b) mod m = (a · b⁻¹) mod m        only if gcd(b, m) = 1
+```
+
+- **Negative remainders differ by language.** In C++ (since C++11) `%` truncates toward zero: `-7 % 3 == -1`. In Python `%` floors: `-7 % 3 == 2`. In C++ always normalize with `((x % m) + m) % m`.
+- **Why `MOD = 1_000_000_007`?** It is **prime**, so every non-zero value has an inverse (Fermat). It is below 2^30, so the sum of two residues fits in a signed 32-bit int. And `(MOD − 1)² ≈ 10^18 < 2^63 ≈ 9.22·10^18`, so the product of two residues fits in a signed 64-bit integer. `998244353` is also common: it is prime with `998244353 = 119·2^23 + 1`, which supports the number-theoretic transform (NTT).
+- **Reduce after every operation**, not just at the end. In C++ the intermediate product must be `long long` *before* multiplying: `1LL * a * b % MOD`, not `(long long)(a * b) % MOD`.
+
+### Fast Modular Exponentiation
+
+Write `e` in binary: `b^13 = b^8 · b^4 · b^1`. Square the base each step and multiply it into the result when the current bit is 1. That is O(log e) multiplications instead of e.
+
+```text
+b^13, e = 1101₂:  bit0=1: r=b      base=b²
+                  bit1=0:          base=b⁴
+                  bit2=1: r=b·b⁴   base=b⁸
+                  bit3=1: r=b⁵·b⁸ = b¹³
+```
+
+### Modular Inverse
+
+`a⁻¹ mod m` exists iff `gcd(a, m) = 1`.
+
+- **Prime m (Fermat):** `a^(m−1) ≡ 1`, so `a⁻¹ = a^(m−2) mod m`. One `modpow` call.
+- **Any m (extended Euclid):** solve `a·x + m·y = 1`; then `x mod m` is the inverse.
+- **All inverses 1..n mod prime p in O(n):** `inv[1] = 1`, `inv[i] = −(p // i) · inv[p mod i] mod p`. This follows from `p = (p // i)·i + (p mod i)` reduced mod p.
+
+### Sieve of Eratosthenes
+
+Mark every multiple of each prime as composite. Start crossing off at `i·i`, because smaller multiples `k·i` with `k < i` were already crossed off by the prime factor `k` (or one of its factors). Stop the outer loop at `√n`. Total work is `Σ_{p ≤ n} n/p = O(n log log n)`.
+
+- **LC 204 Count Primes** counts primes **strictly less than** n. Off-by-one is the classic bug.
+- **Smallest-prime-factor (SPF) sieve:** store `spf[x]` instead of a boolean. Then any `x <= n` factorizes in O(log x) by repeated division by `spf[x]`.
+- **Memory:** use `bytearray` in Python and `std::vector<char>` or `std::vector<bool>` in C++. For n around 10^9, use a **segmented sieve** over blocks of about √n, sieving each block with the base primes up to √n.
+- **Single number:** trial division up to `√n` is O(√n). For 64-bit primality, deterministic Miller-Rabin with the first 12 primes as bases is exact (see [Section 30](#30-randomized-algorithms)).
+
+### Combinatorics: nCr mod p
+
+| Method | Precompute | Query | When |
+|---|---|---|---|
+| Pascal's triangle `C[n][r] = C[n−1][r−1] + C[n−1][r]` | O(n²) time and space | O(1) | n ≤ ~5000, **any modulus** (no division) |
+| Factorials + inverse factorials | O(n + log p) | O(1) | n < p, p prime (the standard 1e9+7 case) |
+| Multiplicative `C = Π (n−r+i)/i` | -- | O(r) | Python big ints or a single query; in C++ divide at each step to stay exact |
+| Lucas' theorem | O(p) | O(log_p n) | n ≥ p (small prime p) |
+
+The factorial method: `C(n, r) = n! · (r!)⁻¹ · ((n−r)!)⁻¹ mod p`. Compute `fact[0..N]`, then **one** Fermat inverse `inv_fact[N] = fact[N]^(p−2)`, and walk down with `inv_fact[i−1] = inv_fact[i] · i`.
+
+**Identities to recognize:**
+- **Grid paths** (LC 62 Unique Paths): `C(m+n−2, m−1)`.
+- **Catalan numbers** `Cat(n) = C(2n, n) / (n + 1)`: 1, 1, 2, 5, 14, 42, ... These count valid parenthesizations (LC 22 count), structurally unique BSTs (LC 96), full binary trees, and non-crossing handshakes.
+- **Stars and bars:** the number of ways to write `n` as an ordered sum of `k` non-negative integers is `C(n+k−1, k−1)`.
+- **Inclusion-exclusion** for "at least one" counts; derangements `D(n) = (n−1)(D(n−1) + D(n−2))`.
+
+**Python** -- number-theory toolkit:
+
+```python
+from math import comb, gcd, isqrt
+from typing import List, Tuple
+
+MOD = 1_000_000_007
+
+
+def my_gcd(a: int, b: int) -> int:
+    while b:
+        a, b = b, a % b
+    return abs(a)
+
+
+def lcm(a: int, b: int) -> int:
+    return 0 if a == 0 or b == 0 else abs(a // my_gcd(a, b) * b)
+
+
+def ext_gcd(a: int, b: int) -> Tuple[int, int, int]:
+    """Return (g, x, y) with a*x + b*y = g = gcd(a, b). Iterative: no recursion limit."""
+    old_r, r = a, b
+    old_x, x = 1, 0
+    old_y, y = 0, 1
+    while r:
+        q = old_r // r
+        old_r, r = r, old_r - q * r
+        old_x, x = x, old_x - q * x
+        old_y, y = y, old_y - q * y
+    return old_r, old_x, old_y
+
+
+def modpow(base: int, exp: int, mod: int) -> int:
+    """Binary exponentiation; same as built-in pow(base, exp, mod)."""
+    result, base = 1 % mod, base % mod
+    while exp > 0:
+        if exp & 1:
+            result = result * base % mod
+        base = base * base % mod
+        exp >>= 1
+    return result
+
+
+def modinv(a: int, m: int) -> int:
+    g, x, _ = ext_gcd(a % m, m)
+    if g != 1:
+        raise ValueError(f"{a} has no inverse mod {m}")
+    return x % m
+
+
+def count_primes(n: int) -> int:
+    """LC 204: number of primes strictly less than n."""
+    if n < 3:
+        return 0
+    is_prime = bytearray([1]) * n
+    is_prime[0] = is_prime[1] = 0
+    for i in range(2, isqrt(n - 1) + 1):
+        if is_prime[i]:
+            is_prime[i * i::i] = bytes(len(range(i * i, n, i)))  # slice assign: C speed
+    return sum(is_prime)
+
+
+class Binomial:
+    """nCr mod prime p in O(1) per query after O(n) precompute (requires n < p)."""
+
+    def __init__(self, n: int, p: int = MOD):
+        self.p = p
+        self.fact = [1] * (n + 1)
+        for i in range(1, n + 1):
+            self.fact[i] = self.fact[i - 1] * i % p
+        self.inv_fact = [1] * (n + 1)
+        self.inv_fact[n] = pow(self.fact[n], p - 2, p)          # one Fermat inverse
+        for i in range(n, 0, -1):
+            self.inv_fact[i - 1] = self.inv_fact[i] * i % p
+
+    def ncr(self, n: int, r: int) -> int:
+        if r < 0 or r > n:
+            return 0
+        return self.fact[n] * self.inv_fact[r] % self.p * self.inv_fact[n - r] % self.p
+
+    def catalan(self, n: int) -> int:
+        return self.ncr(2 * n, n) * pow(n + 1, self.p - 2, self.p) % self.p
+
+
+def reverse_integer(x: int) -> int:
+    """LC 7: reverse digits; return 0 if the result leaves the signed 32-bit range."""
+    sign = -1 if x < 0 else 1
+    r = sign * int(str(abs(x))[::-1])     # Python ints never overflow, so check explicitly
+    return r if -(2 ** 31) <= r <= 2 ** 31 - 1 else 0
+
+
+if __name__ == "__main__":
+    assert my_gcd(240, 46) == gcd(240, 46) == 2
+    print(ext_gcd(240, 46))                         # (2, -9, 47)
+    print(lcm(4, 6), modpow(2, 10, 1000))           # 12 24
+    print(modinv(3, 11), pow(3, -1, 11))            # 4 4
+    print(count_primes(10), count_primes(10 ** 6))  # 4 78498
+    b = Binomial(2000)
+    assert b.ncr(1000, 500) == comb(1000, 500) % MOD
+    print(b.ncr(10, 3), b.catalan(10))              # 120 16796
+    print(reverse_integer(-123), reverse_integer(1534236469))   # -321 0
+    print(-7 % 3)                                   # 2  (C++ gives -1)
+```
+
+**C++** -- same toolkit, with overflow-safe arithmetic:
+
+```cpp
+#include <algorithm>
+#include <climits>
+#include <cstdint>
+#include <iostream>
+#include <numeric>
+#include <stdexcept>
+#include <tuple>
+#include <vector>
+
+constexpr long long MOD = 1'000'000'007LL;
+
+// a*x + b*y = g
+std::tuple<long long, long long, long long> extGcd(long long a, long long b) {
+    long long oldR = a, r = b, oldX = 1, x = 0, oldY = 0, y = 1;
+    while (r != 0) {
+        long long q = oldR / r;
+        std::tie(oldR, r) = std::make_tuple(r, oldR - q * r);
+        std::tie(oldX, x) = std::make_tuple(x, oldX - q * x);
+        std::tie(oldY, y) = std::make_tuple(y, oldY - q * y);
+    }
+    return {oldR, oldX, oldY};
+}
+
+// Safe for mod < ~3.03e9, because (mod-1)^2 must fit in int64.
+long long modpow(long long base, long long exp, long long mod) {
+    long long result = 1 % mod;
+    base %= mod;
+    if (base < 0) base += mod;                 // C++ % can be negative
+    while (exp > 0) {
+        if (exp & 1) result = result * base % mod;
+        base = base * base % mod;
+        exp >>= 1;
+    }
+    return result;
+}
+
+// For 64-bit moduli (e.g. Miller-Rabin): widen to 128 bits (GCC/Clang extension).
+uint64_t mulmod64(uint64_t a, uint64_t b, uint64_t m) {
+    return static_cast<uint64_t>(static_cast<unsigned __int128>(a) * b % m);
+}
+
+long long modinv(long long a, long long m) {
+    auto [g, x, y] = extGcd(((a % m) + m) % m, m);
+    (void)y;
+    if (g != 1) throw std::invalid_argument("no inverse");
+    return ((x % m) + m) % m;
+}
+
+int countPrimes(int n) {                       // LC 204: primes < n
+    if (n < 3) return 0;
+    std::vector<char> isPrime(n, 1);
+    isPrime[0] = isPrime[1] = 0;
+    for (long long i = 2; i * i < n; ++i)      // long long: i*i must not overflow
+        if (isPrime[i])
+            for (long long j = i * i; j < n; j += i) isPrime[j] = 0;
+    return static_cast<int>(std::count(isPrime.begin(), isPrime.end(), 1));
+}
+
+struct Binomial {
+    std::vector<long long> fact, invFact;
+    explicit Binomial(int n) : fact(n + 1, 1), invFact(n + 1, 1) {
+        for (int i = 1; i <= n; ++i) fact[i] = fact[i - 1] * i % MOD;
+        invFact[n] = modpow(fact[n], MOD - 2, MOD);
+        for (int i = n; i > 0; --i) invFact[i - 1] = invFact[i] * i % MOD;
+    }
+    long long nCr(int n, int r) const {
+        if (r < 0 || r > n) return 0;
+        return fact[n] * invFact[r] % MOD * invFact[n - r] % MOD;
+    }
+};
+
+// LC 7: check BEFORE the multiply; signed overflow is undefined behavior.
+int reverseInteger(int x) {
+    int res = 0;
+    while (x != 0) {
+        int d = x % 10;                        // negative digits for negative x
+        x /= 10;
+        if (res > INT_MAX / 10 || (res == INT_MAX / 10 && d > 7)) return 0;
+        if (res < INT_MIN / 10 || (res == INT_MIN / 10 && d < -8)) return 0;
+        res = res * 10 + d;
+    }
+    return res;
+}
+
+int main() {
+    auto [g, x, y] = extGcd(240, 46);
+    std::cout << g << ' ' << x << ' ' << y << '\n';                  // 2 -9 47
+    std::cout << std::gcd(240, 46) << ' ' << std::lcm(4, 6) << '\n'; // 2 12
+    std::cout << modpow(2, 10, 1000) << ' ' << modinv(3, 11) << '\n';// 24 4
+    std::cout << countPrimes(1'000'000) << '\n';                     // 78498
+    Binomial b(2000);
+    std::cout << b.nCr(10, 3) << '\n';                               // 120
+    std::cout << reverseInteger(-123) << ' ' << reverseInteger(1534236469) << '\n'; // -321 0
+    std::cout << (-7 % 3) << '\n';                                   // -1
+    std::cout << mulmod64(1ULL << 62, 1ULL << 62, 1'000'000'000'000'000'003ULL) << '\n';
+    // 657969166809551510 (matches Python: (2**62 * 2**62) % (10**18 + 3))
+
+    long long out;
+    if (__builtin_mul_overflow(LLONG_MAX, 2LL, &out))                // GCC/Clang builtin
+        std::cout << "overflow detected\n";
+}
+```
+
+### Overflow-Safe Arithmetic Checklist
+
+Signed overflow in C++ is **undefined behavior**: the compiler may assume it never happens and optimize your check away. Unsigned arithmetic wraps mod 2^N, and that is well defined.
+
+| Situation | Bug | Fix |
+|---|---|---|
+| Binary search midpoint | `(lo + hi) / 2` overflows | `lo + (hi − lo) / 2`, or `std::midpoint` (C++20) |
+| Product of two ints | `int * int` overflows before widening | `1LL * a * b`, or `static_cast<long long>(a) * b` |
+| Overflow check | `if (a * b > LIMIT)` (already UB) | `if (a > LIMIT / b)` **before** multiplying, or `__builtin_mul_overflow` / `__builtin_add_overflow` (GCC/Clang) |
+| Absolute value / negation | `abs(INT_MIN)`, `-INT_MIN` are UB | widen first: `std::llabs((long long)x)` |
+| `Pow(x, n)` (LC 50) with `n = INT_MIN` | `n = -n` overflows | use `long long N = n`, then `x = 1/x; N = -N` |
+| String to Integer (LC 8) | accumulate then clamp (too late) | clamp when `res > (INT_MAX − d) / 10` |
+| LCM | `a * b / gcd` | `a / gcd * b` |
+| Python | ints are unbounded, so overflow tests "pass" | emulate 32-bit limits explicitly; beware **NumPy fixed-width ints wrap silently** |
+| 64-bit modulus | `a * b % m` with `m ~ 1e18` overflows | `unsigned __int128`, or double-and-add mulmod |
+
+**See also:** [Cpp_Fundamentals.md -- Common Sources of Undefined Behavior](../languages/Cpp_Fundamentals.md#152-common-sources-of-undefined-behavior) · [Math_Probability_Estimation.md -- Catalan numbers](Math_Probability_Estimation.md#26-catalan-numbers) · [Math_Probability_Estimation.md -- Stars and bars](Math_Probability_Estimation.md#23-stars-and-bars) · [Section 24 -- Bit Manipulation](#24-bit-manipulation)
+
+### Key Interview Problems
+
+| Problem | Difficulty | Core Idea |
+|---|---|---|
+| Count Primes (LC 204) | Medium | Sieve from `i*i`, primes **< n** |
+| Pow(x, n) (LC 50) | Medium | Binary exponentiation; `n = INT_MIN` |
+| Super Pow (LC 372) | Medium | `a^(10k + d) = (a^k)^10 · a^d mod 1337` |
+| Reverse Integer (LC 7) | Medium | Overflow check before `res*10 + d` |
+| String to Integer (atoi) (LC 8) | Medium | Clamp during accumulation |
+| Sqrt(x) (LC 69) | Easy | Binary search on answer with `mid <= x / mid` |
+| Unique Paths (LC 62) | Medium | `C(m+n−2, m−1)` or DP |
+| Unique Binary Search Trees (LC 96) | Medium | Catalan number |
+| Fraction to Recurring Decimal (LC 166) | Medium | Long division + remainder→position map; `INT_MIN / −1` |
+| Water and Jug Problem (LC 365) | Medium | Bezout: target is a multiple of `gcd(x, y)` and ≤ `x + y` |
+| Number of Music Playlists (LC 920) | Hard | Counting DP mod 1e9+7 |
+
+### Interview Q&A
+
+**Q1.** Why do so many problems ask for answers modulo 10^9 + 7?
+
+**A.** The true answer is astronomically large, and the modulus keeps it in fixed-width integers. The constant is chosen because it is prime, so every non-zero residue has a multiplicative inverse and "division" by Fermat's little theorem works. It is also below 2^30, so two residues add without overflowing int32, and their product (below about 10^18) fits in int64. The pitfalls: reduce after every add and multiply, normalize negatives after subtraction (C++ `%` can be negative), and widen to 64 bits *before* multiplying.
+
+**Q2.** You need `C(n, r) mod p` for 10^5 queries with n ≤ 10^6. How?
+
+**A.** Precompute `fact[0..10^6]` and `inv_fact`. Use **one** modpow for `inv_fact[N] = fact[N]^(p−2)`, then fill downward with `inv_fact[i−1] = inv_fact[i]·i`. Each query is three multiplications, O(1). That needs p prime and n < p. If the modulus is not prime, use Pascal's triangle (no division) when n is small. Otherwise factor the modulus and combine with CRT, or use Lucas' theorem for a small prime p ≤ n.
+
+**Q3.** What is the complexity of Euclid's algorithm, and why?
+
+**A.** O(log min(a, b)). After two steps the larger argument is at least halved: if `b ≤ a/2` then `a mod b < b ≤ a/2`, and otherwise `a mod b = a − b < a/2`. Lamé's theorem says the worst case is consecutive Fibonacci numbers, and the step count is about `log_φ(min)`. Extended Euclid has the same complexity.
+
+**Q4.** When does a modular inverse exist, and how do you compute it?
+
+**A.** It exists iff `gcd(a, m) = 1`. For prime m use Fermat: `a^(m−2) mod m`, one O(log m) modpow. For general m use extended Euclid: solve `a·x + m·y = 1` and return `x mod m`. In Python 3.8+ `pow(a, -1, m)` does this and raises `ValueError` if no inverse exists. The common bug is dividing directly (`a / b % MOD`), which is wrong after any reduction.
+
+**Q5.** `a * b % m` with `a, b, m` around 10^18 gives garbage in C++. Why, and what are the fixes?
+
+**A.** The product is about 10^36. That overflows 64-bit (UB for signed, silent wrap for unsigned) *before* `%` runs. Fixes: widen to `unsigned __int128` (GCC/Clang), or use "Russian peasant" mulmod (double-and-add with reduction each step, O(log b)). Do not use `long double` tricks in interviews unless you can argue their precision. This matters for Miller-Rabin on 64-bit inputs.
+
+**Q6.** Why does the sieve start crossing off at `i*i`, and what is its complexity?
+
+**A.** Any composite `k·i` with `k < i` has a prime factor at most `k`, so a smaller prime already crossed it off. The work is `Σ_{p ≤ n} n/p = n · Σ 1/p = O(n log log n)` by Mertens' theorem. Memory is O(n) bytes. For large ranges use a segmented sieve, which needs only O(√n) for base primes and one cache-sized block at a time. Pitfall: the outer loop condition `i*i < n` overflows int for n near 2^31, so use `long long` or compare `i <= n / i`.
+
+**Q7.** How do you detect signed overflow in C++ without invoking UB?
+
+**A.** Either check algebraically before the operation (`a > INT_MAX − b` for addition, `a > INT_MAX / b` for positive multiplication, with care for negative operands), use `__builtin_add_overflow` / `__builtin_mul_overflow` (GCC/Clang, which return true on overflow and write the wrapped result), or compute in a wider type. Checking after the fact (`if (a + b < a)`) is UB for signed types, and the optimizer may delete the check. `-fsanitize=undefined` (UBSan) catches these at runtime in tests.
+
+---
+
+## 30. Randomized Algorithms
+
+### Overview
+
+A randomized algorithm makes random choices during execution. Randomness buys **simplicity** (random pivot instead of median-of-medians), **robustness against adversarial inputs** (no fixed worst-case input exists), and **sublinear memory** for streams (reservoir sampling). Sampling is also central to profiling tools: a profiler that keeps a bounded, uniform sample of events from an unbounded stream is running reservoir sampling.
+
+| | **Las Vegas** | **Monte Carlo** |
+|---|---|---|
+| Correctness | always correct | correct with probability ≥ 1 − ε |
+| Running time | random (analyze the **expected** value) | bounded (deterministic bound) |
+| Examples | randomized quicksort/quickselect, Rabin-Karp **with** match verification, treaps, universal hashing with chaining | Miller-Rabin primality, Freivalds' matrix check, Karger min cut, Bloom filters, Rabin-Karp **without** verification, HyperLogLog |
+| Las Vegas → Monte Carlo | stop after `c · E[T]` steps and output "fail" (Markov: P[fail] ≤ 1/c) | |
+| Monte Carlo → Las Vegas | | possible if you can **verify** an answer cheaply: repeat until it verifies |
+| Error reduction | -- | **amplification**: k independent runs give one-sided error ≤ ε^k |
+
+**One-sided vs two-sided error.** Miller-Rabin never calls a prime composite. It errs only by calling a composite "probably prime", with probability ≤ 1/4 per random base, so k rounds give ≤ 4^(−k). For 64-bit integers, testing the first 12 primes (2 through 37) as bases is **deterministic**. A Bloom filter has false positives but never false negatives.
+
+> **Practice these as patterns:** quickselect for top-k in [LeetCode_Patterns.md -- Top K Elements](LeetCode_Patterns.md#12-top-k-elements), prefix sums + binary search (Random Pick with Weight) in [LeetCode_Patterns.md -- Prefix Sum & Difference Array](LeetCode_Patterns.md#21-prefix-sum--difference-array), 3-way partitioning (Sort Colors) in [LeetCode_Patterns.md -- Hashing & Array Classics](LeetCode_Patterns.md#22-hashing--array-classics). Puzzle-style probability versions of the shuffle and reservoir proofs are in [Math_Probability_Estimation.md -- Shuffle correctness](Math_Probability_Estimation.md#714-shuffle-correctness-fisher-yates) and [Reservoir sampling](Math_Probability_Estimation.md#715-reservoir-sampling-with-proof).
+
+### Fisher-Yates Shuffle
+
+**Algorithm (Durstenfeld's in-place version):**
+
+```text
+for i from n−1 down to 1:
+    j = uniform random integer in [0, i]     <- inclusive of i
+    swap a[i], a[j]
+```
+
+O(n) time, O(1) extra space.
+
+**Proof of uniformity (counting).** Step `i` has exactly `i + 1` equally likely choices, so the algorithm has `n · (n−1) · ... · 2 = n!` equally likely choice sequences. Each sequence produces a **different** permutation: at step `i`, the choice decides which of the remaining elements is fixed at position `i`, and that element never moves again. So the map from choice sequences to permutations is a bijection onto all `n!` permutations, and each permutation has probability exactly `1/n!`.
+
+**Proof of uniformity (per position).** The probability that a given element `x` lands at position `n−1` is `1/n`. It lands at position `n−2` iff it was not picked first and is then picked from the `n−1` remaining: `(n−1)/n · 1/(n−1) = 1/n`. By induction every position gets `x` with probability `1/n`.
+
+**The naive-shuffle bug.** `for i in range(n): swap(a[i], a[randint(0, n−1)])` makes `n^n` equally likely choice sequences. For `n ≥ 3`, `n!` does not divide `n^n` (`n−1` shares no factor with `n`, and `n−1 > 1` divides `n!`), so the `n!` permutations **cannot** all be equally likely. Exhaustive enumeration for n = 3 (27 sequences):
+
+| Permutation | Naive count (of 27) | Fisher-Yates count (of 6) |
+|---|---|---|
+| (0, 1, 2) | 4 | 1 |
+| (0, 2, 1) | 5 | 1 |
+| (1, 0, 2) | 5 | 1 |
+| (1, 2, 0) | 5 | 1 |
+| (2, 0, 1) | 4 | 1 |
+| (2, 1, 0) | 4 | 1 |
+
+**Other shuffle bugs interviewers probe:**
+- **`j` in `[0, i)` instead of `[0, i]`** (excluding `i`) is **Sattolo's algorithm**. It produces only the `(n−1)!` **cyclic** permutations, so no element ever stays in place.
+- **Modulo bias:** `rand() % (i + 1)` is non-uniform unless `RAND_MAX + 1` is divisible by `i + 1`. With `RAND_MAX = 32767` and `% 10`, residues 0–7 occur 3277 times out of 32768 and residues 8–9 occur 3276 times. Use `std::uniform_int_distribution`, or rejection sampling.
+- **Sorting with a random comparator** (`sort(a, cmp = random)`) violates strict weak ordering. That is UB in C++ and produces biased results in practice. Sorting by a random **key** is fine, but it costs O(n log n), and ties need care.
+- **C++:** `std::random_shuffle` was deprecated in C++14 and **removed in C++17**. Use `std::shuffle(begin, end, std::mt19937{seed})`. Python: `random.shuffle(a)` (in place) or `random.sample(a, k)`.
+
+### Reservoir Sampling
+
+**Problem.** Pick `k` items uniformly at random from a stream of unknown (possibly unbounded) length `n`, in one pass and O(k) memory. Examples: LC 382 Linked List Random Node, LC 398 Random Pick Index, or keeping a uniform sample of trace records or kernel dispatches without storing the whole trace.
+
+**Algorithm R:**
+
+```text
+keep the first k items
+for the i-th item (1-based), i > k:
+    j = uniform random integer in [1, i]
+    if j <= k: reservoir[j] = item_i          <- i.e. keep item_i with probability k/i
+```
+
+**Proof (induction on the stream length).** Claim: after `n ≥ k` items, every item is in the reservoir with probability `k/n`.
+- Base `n = k`: every item is kept, with probability 1 = k/k.
+- Step `n−1 → n`: the new item `n` is kept with probability `k/n` by construction. An old item that was in the reservoir (probability `k/(n−1)` by the hypothesis) gets evicted only if item `n` is kept **and** lands in its slot: `(k/n) · (1/k) = 1/n`. So it survives with probability `1 − 1/n = (n−1)/n`, and overall it is present with probability `k/(n−1) · (n−1)/n = k/n`. ∎
+
+Equivalently, item `i` enters with probability `k/i` and survives every later step `j` with probability `(j−1)/j`. The product telescopes: `k/i · i/(i+1) · ... · (n−1)/n = k/n`.
+
+**Extensions to know by name:**
+- **Algorithm L** (Li, 1994): instead of drawing a random number per item, draw how many items to **skip** (a geometric-like jump). The expected number of random draws drops to O(k(1 + log(n/k))). This is useful when the stream is fast and RNG cost dominates.
+- **Weighted sampling without replacement (Efraimidis-Spirakis A-Res):** give each item the key `u^(1/w)` with `u ~ Uniform(0,1)`, and keep the `k` largest keys in a min-heap.
+- **Distributed / merging reservoirs:** two reservoirs from streams of sizes `n₁` and `n₂` cannot simply be concatenated and subsampled uniformly. Draw how many items come from stream 1 from a hypergeometric distribution (k draws from `n₁ + n₂` with `n₁` "successes"), then take that many items uniformly from reservoir 1 and the rest from reservoir 2.
+
+### Randomized Quickselect -- Expected O(n)
+
+Quickselect partitions around a random pivot and recurses into **one** side (see [Section 21 -- Quick Select](#quick-select) for the basic version).
+
+**Expected-time proof ("good pivot" phases).** Call a pivot **good** if its rank lies in the middle half of the current subarray, so at least `m/4` elements sit on each side. A random pivot is good with probability 1/2, and after a good pivot the subarray has size ≤ `3m/4`. Say the algorithm is in **phase j** while the subarray size is in `((3/4)^(j+1)·n, (3/4)^j·n]`. The number of pivots spent in a phase is geometric with success probability 1/2, so its expectation is ≤ 2. Each partition in phase j costs ≤ `c·(3/4)^j·n`. By linearity of expectation:
+
+```text
+E[T(n)] ≤ Σ_j 2 · c · (3/4)^j · n = 2cn · 1/(1 − 3/4) = 8cn = O(n)
+```
+
+A sharper analysis (Knuth) gives about `2(1 + ln 2)·n ≈ 3.39n` expected comparisons for the median, and fewer for extreme `k`.
+
+- **Worst case** is O(n²): the pivot is always the min or max. With random pivots this has vanishing probability, and it is input-independent, so no adversary can force it.
+- **Duplicates:** a 2-way Lomuto partition degrades to O(n²) when all elements are equal. Use **3-way partitioning** (`< pivot`, `== pivot`, `> pivot`) as below.
+- **Deterministic O(n):** median of medians (groups of 5) gives `T(n) ≤ T(n/5) + T(7n/10) + O(n) = O(n)`, but the constant is large. `std::nth_element` uses **introselect**: quickselect that falls back to a guaranteed method if recursion goes too deep. The standard requires linear time on average.
+
+### Random Pick with Weight (LC 528)
+
+Build prefix sums `P` of the weights. Draw `x` uniformly in `[0, total)`, and return the first index with `P[i] > x` (`bisect_right`). Setup is O(n) and each pick is O(log n). The **alias method** (Vose) gives O(1) per pick after O(n) setup. It is worth naming when picks vastly outnumber updates.
+
+**Python** -- shuffle, exact distribution check, reservoir, quickselect, weighted pick, Freivalds:
+
+```python
+import bisect
+import random
+from collections import Counter
+from itertools import accumulate, product
+from typing import Iterable, List
+
+
+def fisher_yates(a: List, rng: random.Random) -> None:
+    for i in range(len(a) - 1, 0, -1):
+        j = rng.randint(0, i)              # inclusive of i
+        a[i], a[j] = a[j], a[i]
+
+
+def exact_distribution(n: int, naive: bool) -> Counter:
+    """Enumerate every possible sequence of random choices (no sampling noise)."""
+    if naive:
+        positions = list(range(n))                      # swap a[i] with a[randint(0, n-1)]
+        choice_sets = [range(n)] * n
+    else:
+        positions = list(range(n - 1, 0, -1))           # Fisher-Yates
+        choice_sets = [range(i + 1) for i in positions]
+    counts: Counter = Counter()
+    for choices in product(*choice_sets):
+        a = list(range(n))
+        for i, j in zip(positions, choices):
+            a[i], a[j] = a[j], a[i]
+        counts[tuple(a)] += 1
+    return counts
+
+
+def reservoir_sample(stream: Iterable, k: int, rng: random.Random) -> List:
+    reservoir: List = []
+    for i, item in enumerate(stream):      # item is the (i+1)-th element
+        if i < k:
+            reservoir.append(item)
+        else:
+            j = rng.randint(0, i)          # i+1 equally likely slots
+            if j < k:
+                reservoir[j] = item        # kept with probability k/(i+1)
+    return reservoir
+
+
+def quickselect(nums: List[int], k: int, rng: random.Random) -> int:
+    """k-th smallest (0-based). Expected O(n), 3-way partition handles duplicates."""
+    a = list(nums)
+    lo, hi = 0, len(a) - 1
+    while True:
+        pivot = a[rng.randint(lo, hi)]
+        lt, i, gt = lo, lo, hi             # a[lo:lt] < p, a[lt:i] == p, a[gt+1:hi+1] > p
+        while i <= gt:
+            if a[i] < pivot:
+                a[lt], a[i] = a[i], a[lt]
+                lt += 1
+                i += 1
+            elif a[i] > pivot:
+                a[i], a[gt] = a[gt], a[i]
+                gt -= 1
+            else:
+                i += 1
+        if k < lt:
+            hi = lt - 1
+        elif k > gt:
+            lo = gt + 1
+        else:
+            return pivot
+
+
+class RandomPickWeight:                     # LC 528
+    def __init__(self, w: List[int], rng: random.Random):
+        self.prefix = list(accumulate(w))
+        self.rng = rng
+
+    def pick_index(self) -> int:
+        x = self.rng.random() * self.prefix[-1]          # uniform in [0, total)
+        return bisect.bisect_right(self.prefix, x)
+
+
+def freivalds(A, B, C, rounds: int, rng: random.Random) -> bool:
+    """Monte Carlo check of A @ B == C in O(rounds * n^2). False is always correct;
+    True is wrong with probability <= 2**-rounds."""
+    n = len(A)
+    mat_vec = lambda M, v: [sum(M[i][j] * v[j] for j in range(n)) for i in range(n)]
+    for _ in range(rounds):
+        r = [rng.randint(0, 1) for _ in range(n)]
+        if mat_vec(A, mat_vec(B, r)) != mat_vec(C, r):
+            return False
+    return True
+
+
+if __name__ == "__main__":
+    rng = random.Random(42)                # seeded: reproducible tests
+
+    print(sorted(exact_distribution(3, naive=True).values()))   # [4, 4, 4, 5, 5, 5]
+    print(sorted(exact_distribution(3, naive=False).values()))  # [1, 1, 1, 1, 1, 1]
+
+    trials, hits = 100_000, Counter()
+    for _ in range(trials):
+        hits.update(reservoir_sample(range(10), 3, rng))
+    print(all(abs(hits[x] / trials - 0.3) < 0.01 for x in range(10)))  # True (each ~0.300)
+
+    data = [rng.randint(0, 50) for _ in range(1001)]
+    assert all(quickselect(data, k, rng) == sorted(data)[k] for k in (0, 500, 1000))
+    print(quickselect([3, 3, 3, 3], 2, rng))                     # 3
+
+    picker = RandomPickWeight([1, 3], rng)
+    share = sum(picker.pick_index() for _ in range(100_000)) / 100_000
+    print(abs(share - 0.75) < 0.01)                              # True (index 1 ~75%)
+
+    A, B = [[1, 2], [3, 4]], [[5, 6], [7, 8]]
+    print(freivalds(A, B, [[19, 22], [43, 50]], 20, rng))        # True
+    print(freivalds(A, B, [[19, 22], [43, 51]], 20, rng))        # False (w.p. >= 1 - 2^-20)
+```
+
+**C++** -- Fisher-Yates, reservoir sampling, and quickselect with `<random>`:
+
+```cpp
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <numeric>
+#include <random>
+#include <vector>
+
+template <typename T>
+void fisherYates(std::vector<T>& a, std::mt19937& rng) {
+    for (std::size_t i = a.size(); i-- > 1;) {                 // i = n-1 .. 1
+        std::uniform_int_distribution<std::size_t> dist(0, i); // inclusive, no modulo bias
+        std::swap(a[i], a[dist(rng)]);
+    }
+}
+
+// Streaming reservoir of size k (Algorithm R).
+template <typename T>
+class Reservoir {
+public:
+    Reservoir(std::size_t k, std::mt19937& rng) : k_(k), rng_(rng) { sample_.reserve(k); }
+    void add(const T& item) {
+        ++seen_;
+        if (sample_.size() < k_) { sample_.push_back(item); return; }
+        std::uniform_int_distribution<std::size_t> dist(0, seen_ - 1);
+        std::size_t j = dist(rng_);
+        if (j < k_) sample_[j] = item;                          // probability k / seen
+    }
+    const std::vector<T>& sample() const { return sample_; }
+private:
+    std::size_t k_, seen_ = 0;
+    std::mt19937& rng_;
+    std::vector<T> sample_;
+};
+
+int quickselect(std::vector<int> a, int k, std::mt19937& rng) {  // k-th smallest, 0-based
+    int lo = 0, hi = static_cast<int>(a.size()) - 1;
+    while (true) {
+        std::uniform_int_distribution<int> dist(lo, hi);
+        int pivot = a[dist(rng)];
+        int lt = lo, i = lo, gt = hi;                            // 3-way partition
+        while (i <= gt) {
+            if (a[i] < pivot) std::swap(a[lt++], a[i++]);
+            else if (a[i] > pivot) std::swap(a[i], a[gt--]);
+            else ++i;
+        }
+        if (k < lt) hi = lt - 1;
+        else if (k > gt) lo = gt + 1;
+        else return pivot;
+    }
+}
+
+int main() {
+    std::mt19937 rng(12345);                 // fixed seed for tests; std::random_device{}() in prod
+
+    std::vector<int> counts(6, 0);           // permutations of {0,1,2}, ranked lexicographically
+    const int trials = 600'000;
+    for (int t = 0; t < trials; ++t) {
+        std::vector<int> a{0, 1, 2};
+        fisherYates(a, rng);
+        std::vector<int> ref{0, 1, 2};
+        int rank = 0;
+        while (ref != a) { std::next_permutation(ref.begin(), ref.end()); ++rank; }
+        ++counts[rank];
+    }
+    bool uniform = std::all_of(counts.begin(), counts.end(),
+                               [&](int c) { return std::abs(c - trials / 6) < 2'000; });
+    std::cout << "shuffle uniform: " << std::boolalpha << uniform << '\n';   // true
+
+    Reservoir<int> res(3, rng);
+    for (int x = 0; x < 1'000'000; ++x) res.add(x);
+    std::cout << "reservoir size: " << res.sample().size() << '\n';         // 3
+
+    std::vector<int> v(1001);
+    std::iota(v.begin(), v.end(), 0);
+    std::shuffle(v.begin(), v.end(), rng);   // the library Fisher-Yates
+    std::cout << "median: " << quickselect(v, 500, rng) << '\n';            // 500
+}
+```
+
+**Reproducibility.** Seed explicitly in tests (`random.Random(42)`, `std::mt19937 rng(12345)`) so failures replay. Note that `std::uniform_int_distribution` output is **implementation-defined**, so the same seed can give different values on libstdc++ and libc++. For cross-platform golden outputs, use the raw engine output, which the standard fully specifies. Do not seed `mt19937` with `time(nullptr)` in anything security-relevant. Neither `mt19937` nor Python's `random` is cryptographically secure; use `secrets` in Python and an OS CSPRNG in C++.
+
+### Key Interview Problems
+
+| Problem | Difficulty | Core Idea |
+|---|---|---|
+| Shuffle an Array (LC 384) | Medium | Fisher-Yates; `reset` keeps a copy of the original |
+| Linked List Random Node (LC 382) | Medium | Reservoir sampling, k = 1 |
+| Random Pick Index (LC 398) | Medium | Reservoir over indices where `nums[i] == target` |
+| Random Pick with Weight (LC 528) | Medium | Prefix sums + `bisect_right` |
+| Random Pick with Blacklist (LC 710) | Hard | Let `m = n − len(B)`; remap blacklisted values `< m` to allowed values `≥ m`, pick in `[0, m)` |
+| Insert Delete GetRandom O(1) (LC 380) | Medium | Array + value→index map; swap-with-last on delete |
+| Kth Largest Element in an Array (LC 215) | Medium | Randomized quickselect, expected O(n) |
+| Implement Rand10() Using Rand7() (LC 470) | Medium | Rejection sampling: `(rand7()−1)·7 + rand7()` in 1..49, accept ≤ 40 |
+
+**See also:** [Math_Probability_Estimation.md -- Linearity of expectation](Math_Probability_Estimation.md#42-linearity-of-expectation) · [Math_Probability_Estimation.md -- rand7 from rand5](Math_Probability_Estimation.md#712-rand7-from-rand5-and-rand10-from-rand7) · [Section 21 -- Divide and Conquer](#21-divide-and-conquer) · [Section 5 -- Hash Tables](#5-hash-tables) · [Performance_Engineering.md](Performance_Engineering.md)
+
+### Interview Q&A
+
+**Q1.** Prove that reservoir sampling with reservoir size k returns each of n stream items with probability k/n.
+
+**A.** By induction on n. For n = k all items are kept. Assume the claim holds after n−1 items. Item n is kept with probability k/n by construction. An earlier item is in the reservoir with probability k/(n−1), and it is evicted only if item n is kept and replaces its specific slot, with probability (k/n)(1/k) = 1/n. It therefore remains with probability k/(n−1) · (n−1)/n = k/n. Memory is O(k), one pass, and n need not be known in advance. Follow-up: for a k-subset of a *known-size* array, a partial Fisher-Yates (first k swaps) is simpler and costs O(k).
+
+**Q2.** What is wrong with `for i in range(n): swap(a[i], a[random.randint(0, n-1)])`?
+
+**A.** It generates n^n equally likely choice sequences, and those map onto n! permutations. For n ≥ 3, n! does not divide n^n, because n−1 divides n! but shares no prime factor with n^n. So some permutations must be more likely than others. For n = 3, 27 sequences give counts 4, 5, 5, 5, 4, 4. The fix is Fisher-Yates, with j drawn from [0, i] at step i (or [i, n−1] when iterating forward), which gives exactly n! sequences in bijection with permutations. A related pitfall: drawing j from [0, i) is Sattolo's algorithm, which produces only cyclic permutations.
+
+**Q3.** Las Vegas vs Monte Carlo: define them, give examples, and explain how to convert between them.
+
+**A.** Las Vegas algorithms are always correct, and their running time is random: randomized quicksort or quickselect, and Rabin-Karp that verifies each hash match. Monte Carlo algorithms have bounded time and may be wrong with small probability: Miller-Rabin, Freivalds, Karger, Bloom filters. To convert Las Vegas to Monte Carlo, cut off at c·E[T] steps; by Markov's inequality the failure probability is ≤ 1/c. To convert Monte Carlo to Las Vegas, verify each answer and retry until one verifies; this works only if verification is cheap. Monte Carlo error is reduced by independent repetition: one-sided error ε becomes ε^k, and two-sided error drops exponentially with a majority vote (Chernoff bound).
+
+**Q4.** Why is randomized quickselect expected O(n), and how do you make it worst-case O(n)?
+
+**A.** A random pivot lands in the middle half with probability 1/2, which shrinks the problem to ≤ 3/4 of its size. The expected number of partitions per shrink is ≤ 2, so the expected work is ≤ 2c·n·Σ(3/4)^j = 8cn. (A sharper bound is about 3.39n comparisons for the median.) The worst case is O(n²), but no input triggers it reliably. For a guarantee, use median-of-medians (T(n) ≤ T(n/5) + T(7n/10) + O(n)), or introselect, which falls back after too many bad partitions. Use 3-way partitioning, otherwise arrays with many duplicates degrade to O(n²).
+
+**Q5.** You need a uniform sample of 1,000 kernel-dispatch records from a profiling run that may emit 10^9 records across 8 GPUs, each producing its own stream. How?
+
+**A.** Run Algorithm R (or Algorithm L, which uses fewer RNG calls) independently per GPU stream with k = 1000, and record each stream's count n_g. To merge, draw how many of the final 1000 come from each stream with multivariate hypergeometric weights proportional to n_g (sequentially: pick stream g with probability remaining_g / remaining_total, then decrement remaining_g and remaining_total), then sample that many uniformly from that stream's reservoir. Naively concatenating the 8 reservoirs and subsampling over-represents short streams. If records have weights (e.g. duration-weighted sampling), use A-Res keys `u^(1/w)` with a size-k min-heap. Those keys also merge trivially: take the top k keys overall.
+
+**Q6.** How would you test that a shuffle is uniform?
+
+**A.** For tiny n, enumerate all random-choice sequences exactly (as in the table above), which gives an exact, noise-free check. For larger n, run many trials with a fixed seed, histogram either permutations (small n) or element-to-position counts (an n×n matrix with expected `trials/n` each), and apply a chi-square goodness-of-fit test with a tolerance chosen from the desired false-alarm rate. Also unit-test structural bugs: the output is a permutation of the input, an element can stay in place (which catches Sattolo), and positions are not correlated.
 
 ---
 
