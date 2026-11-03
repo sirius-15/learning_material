@@ -1,6 +1,8 @@
 # CMake Fundamentals -- Comprehensive Reference
 
-> A deep-dive reference for modern target-based CMake (3.x) plus the surrounding ecosystem: Ninja, CTest, CPack, ccache, vcpkg, Conan, sanitizers, cross-compilation, and IDE integration. Each section includes conceptual explanations, comparison tables, code examples, common pitfalls, and interview questions with detailed answers. Complements the *C++ Fundamentals*, *C++ Testing*, and *Parallel GPU Programming* guides.
+> Last reviewed: 2026-11 · Versions assumed: CMake 3.28-4.x, ROCm 6.x/7.x
+
+> A deep-dive reference for modern target-based CMake (3.x and 4.x) plus the surrounding ecosystem: Ninja, CTest, CPack, ccache, vcpkg, Conan, sanitizers, cross-compilation, IDE integration, HIP/ROCm builds, RPATH handling, Python extensions, symbol visibility, and static-library link order. Each section includes conceptual explanations, comparison tables, code examples, common pitfalls, and interview questions with detailed answers. Complements the *C++ Fundamentals*, *C++ Testing*, and *Parallel GPU Programming* guides.
 
 ---
 
@@ -111,12 +113,20 @@
 62. [C++20 Modules Support](#62-c20-modules-support)
 63. [Refactoring Legacy CMake](#63-refactoring-legacy-cmake)
 
-### Part 15: Best Practices and Interview Questions
+### Part 15: GPU, Python, and Linking Specifics
 
-64. [Project Layout and Conventions](#64-project-layout-and-conventions)
-65. [Cheatsheet](#65-cheatsheet)
-66. [Common Pitfalls](#66-common-pitfalls)
-67. [Interview Questions and Answers](#67-interview-questions-and-answers)
+64. [HIP and ROCm with CMake](#64-hip-and-rocm-with-cmake)
+65. [RPATH and RUNPATH](#65-rpath-and-runpath)
+66. [Building Python Extensions](#66-building-python-extensions)
+67. [Symbol Visibility and Export Control](#67-symbol-visibility-and-export-control)
+68. [Static Library Link Order and Circular Dependencies](#68-static-library-link-order-and-circular-dependencies)
+
+### Part 16: Best Practices and Interview Questions
+
+69. [Project Layout and Conventions](#69-project-layout-and-conventions)
+70. [Cheatsheet](#70-cheatsheet)
+71. [Common Pitfalls](#71-common-pitfalls)
+72. [Interview Questions and Answers](#72-interview-questions-and-answers)
 
 ---
 
@@ -486,7 +496,7 @@ The `LANGUAGES` argument is important. If you omit it, CMake defaults to `C CXX`
 | `ASM` | Assembler |
 | `Fortran` | Fortran compiler |
 | `CUDA` | CUDA compiler (`nvcc`) |
-| `HIP` | AMD HIP compiler |
+| `HIP` | AMD HIP compiler (ROCm clang, 3.21+; see Section 64) |
 | `OBJC` / `OBJCXX` | Objective-C/C++ |
 | `Swift` | Swift compiler |
 | `NONE` | Disable any language detection (useful for script-only projects) |
@@ -2117,7 +2127,7 @@ cmake --build build --config Debug
 cmake --build build --config Release
 ```
 
-## 20.3 Always Use $<CONFIG> for Config Logic
+## 20.3 Always Use `$<CONFIG>` for Config Logic
 
 Because `CMAKE_BUILD_TYPE` is empty on multi-config generators, this is **wrong** for cross-generator code:
 
@@ -4137,7 +4147,7 @@ include(GenerateExportHeader)
 generate_export_header(my_lib EXPORT_FILE_NAME my_lib_export.h)
 ```
 
-This produces `my_lib_export.h` with a `MY_LIB_EXPORT` macro that expands to `__declspec(dllexport)` when building the library and `__declspec(dllimport)` when consuming it.
+This produces `my_lib_export.h` with a `MY_LIB_EXPORT` macro that expands to `__declspec(dllexport)` when building the library and `__declspec(dllimport)` when consuming it. On Linux the same macro expands to `__attribute__((visibility("default")))`, which matters once you build with hidden visibility. Section 67 covers that, plus version scripts.
 
 ---
 
@@ -5360,7 +5370,6 @@ For GCC/Clang on Linux:
 | `-Wl,-z,relro,-z,now` | Read-Only Relocations; resolve all symbols at startup |
 | `-Wl,-z,noexecstack` | Mark the stack non-executable |
 | `-fcf-protection=full` | Control-Flow Integrity (Intel CET, modern CPUs) |
-| `-fstack-clash-protection` | Defend against stack-clash exploits |
 
 ```cmake
 add_library(project_hardening INTERFACE)
@@ -6110,15 +6119,1062 @@ Run the consumer's compile manually with `-v` to see the actual `-I` and `-D` fl
 
 ---
 
-# Part 15: Best Practices and Interview Questions
+# Part 15: GPU, Python, and Linking Specifics
 
 ---
 
-# 64. Project Layout and Conventions
+# 64. HIP and ROCm with CMake
+
+> See also: [HIP compilation with hipcc](../ml-gpu/Parallel_GPU_Programming.md#255-compilation), [CUDA-to-HIP porting](../ml-gpu/Parallel_GPU_Programming.md#29-cuda-to-hip-porting), [AMD GPU Architecture and Profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md), [Project deep dive: rocprof-compute](../career/Project_Deep_Dive_rocprof-compute.md).
 
 ---
 
-## 64.1 The Recommended Layout
+## 64.1 Three Ways to Build HIP Code
+
+HIP source is C++ with GPU extensions (`__global__`, `<<<...>>>`, `__shared__`). A compiler that understands it is needed: ROCm's LLVM `clang++` (also shipped as `amdclang++`) with `-x hip --offload-arch=gfxXXX`. CMake can drive that compiler in three ways:
+
+| Approach | Setup | Min CMake | Status |
+|---|---|---|---|
+| **HIP language** | `project(p LANGUAGES CXX HIP)` or `enable_language(HIP)`; `.hip` files, or `LANGUAGE HIP` on other files | 3.21 (3.28 for `CMAKE_HIP_PLATFORM`/NVIDIA) | Recommended by the ROCm "Using CMake" guide |
+| **CXX + `hip::device`** | `CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++`, `find_package(hip)`, link `hip::device`, select GPUs with `GPU_TARGETS` | 3.8+ | Called "legacy" by the ROCm docs. Still common in older ROCm libraries |
+| **`hipcc` as `CMAKE_CXX_COMPILER`** | `CXX=/opt/rocm/bin/hipcc cmake ...` | any | Works, because CMake treats `hipcc` as the clang underneath. Discouraged: the wrapper adds flags CMake does not know about |
+
+Why the HIP language is better:
+
+- **Device code is a separate language.** A single target can have plain `.cpp` files compiled by `g++` (fast, host only) next to `.hip` files compiled by ROCm clang. With `hip::device`, every file in the target is compiled with `-x hip`, including files that contain no GPU code.
+- **Per-target architectures.** `HIP_ARCHITECTURES` is a target property. `GPU_TARGETS` is read once, when `find_package(hip)` runs, and is applied to every `hip::device` consumer.
+- **First-class language features.** You get `CMAKE_HIP_FLAGS`, `HIP_STANDARD`, `$<COMPILE_LANGUAGE:HIP>`, `try_compile`, and correct `compile_commands.json` entries for clangd.
+- **`hipcc` is rejected as the HIP compiler.** Since CMake 3.21.3, `hipcc` is rejected as `CMAKE_HIP_COMPILER`; it is still accepted as a CXX compiler. The release notes say it "interferes with flags CMake needs to pass to Clang". CMake 4.2's error text is:
+
+```text
+CMAKE_HIP_COMPILER is set to the hipcc wrapper:
+ /opt/rocm/bin/hipcc
+This is not supported.  Use Clang directly, or let CMake pick a default.
+```
+
+## 64.2 The HIP Language: A Complete Project
+
+```text
+vadd/
+|-- CMakeLists.txt
+`-- src/
+    |-- vadd.hpp          <- plain C++ interface (no HIP types)
+    |-- vadd.hip          <- kernel + launcher (compiled by ROCm clang)
+    |-- device_info.cpp   <- calls the HIP runtime API, launches nothing (compiled by g++)
+    `-- main.cpp          <- pure C++
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.21...4.2)
+
+# Set this BEFORE project()/enable_language(HIP). If it is undefined when the
+# language is enabled, CMake fills in a cached default from the GPUs it detects.
+set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942" CACHE STRING "AMD GPU targets")
+
+project(vadd LANGUAGES CXX HIP)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+
+find_package(hip REQUIRED)          # only needed for hip::host (host-only C++ TUs)
+
+# Device code: .hip files are compiled by ROCm clang with -x hip --offload-arch=...
+add_library(vadd_kernels STATIC src/vadd.hip)
+target_include_directories(vadd_kernels PUBLIC src)
+
+# Host-only C++ that calls the HIP runtime API but launches no kernels is
+# compiled by the regular CXX compiler and needs only hip::host
+# (headers + __HIP_PLATFORM_AMD__ + libamdhip64).
+add_executable(vadd_app src/main.cpp src/device_info.cpp)
+target_link_libraries(vadd_app PRIVATE vadd_kernels hip::host)
+```
+
+```cpp
+// src/vadd.hpp
+#pragma once
+#include <cstddef>
+// Plain C++ interface: callers never see HIP types.
+void vadd(const float* a, const float* b, float* c, std::size_t n);
+```
+
+```cpp
+// src/vadd.hip
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include "vadd.hpp"
+
+#define HIP_CHECK(expr)                                                   \
+  do {                                                                    \
+    hipError_t err_ = (expr);                                             \
+    if (err_ != hipSuccess) {                                             \
+      std::fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__,             \
+                   hipGetErrorString(err_));                              \
+      std::exit(EXIT_FAILURE);                                            \
+    }                                                                     \
+  } while (0)
+
+__global__ void vadd_kernel(const float* a, const float* b, float* c,
+                            std::size_t n) {
+  std::size_t i = blockIdx.x * static_cast<std::size_t>(blockDim.x) + threadIdx.x;
+  if (i < n) c[i] = a[i] + b[i];
+}
+
+void vadd(const float* a, const float* b, float* c, std::size_t n) {
+  const std::size_t bytes = n * sizeof(float);
+  float *da = nullptr, *db = nullptr, *dc = nullptr;
+  HIP_CHECK(hipMalloc(&da, bytes));
+  HIP_CHECK(hipMalloc(&db, bytes));
+  HIP_CHECK(hipMalloc(&dc, bytes));
+  HIP_CHECK(hipMemcpy(da, a, bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(db, b, bytes, hipMemcpyHostToDevice));
+  const unsigned block = 256;
+  const unsigned grid = static_cast<unsigned>((n + block - 1) / block);
+  vadd_kernel<<<grid, block>>>(da, db, dc, n);
+  HIP_CHECK(hipGetLastError());   // catches launch failures such as a missing code object
+  HIP_CHECK(hipMemcpy(c, dc, bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(da));
+  HIP_CHECK(hipFree(db));
+  HIP_CHECK(hipFree(dc));
+}
+```
+
+```cpp
+// src/device_info.cpp -- host-only: compiled by g++, linked against hip::host
+#include <hip/hip_runtime_api.h>
+#include <cstdio>
+
+void print_devices() {
+  int count = 0;
+  if (hipGetDeviceCount(&count) != hipSuccess) count = 0;
+  for (int d = 0; d < count; ++d) {
+    hipDeviceProp_t prop;
+    if (hipGetDeviceProperties(&prop, d) == hipSuccess)
+      std::printf("device %d: %s (%s)\n", d, prop.name, prop.gcnArchName);
+  }
+}
+```
+
+```cpp
+// src/main.cpp
+#include <cstdio>
+#include <vector>
+#include "vadd.hpp"
+
+void print_devices();
+
+int main() {
+  print_devices();
+  const std::size_t n = 1 << 20;
+  std::vector<float> a(n, 1.0f), b(n, 2.0f), c(n, 0.0f);
+  vadd(a.data(), b.data(), c.data(), n);
+  std::printf("c[0]=%.1f c[n-1]=%.1f\n", c[0], c[n - 1]);
+  return c[0] == 3.0f && c[n - 1] == 3.0f ? 0 : 1;
+}
+```
+
+Configure and build:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_HIP_ARCHITECTURES=gfx942 \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build -v        # -v shows the real compile lines
+```
+
+The verbose build shows the split. Paths are shortened here. This output was captured with `-DCMAKE_HIP_ARCHITECTURES=gfx950` on an MI350X node running a TheRock ROCm nightly (HIP 7.16):
+
+```text
+/usr/bin/c++ -D__HIP_PLATFORM_AMD__=1 -isystem /opt/rocm/include ... -c src/device_info.cpp
+/opt/rocm/lib/llvm/bin/clang++ -D__HIP_ROCclr__=1 ... --offload-arch=gfx950 ... -x hip -c src/vadd.hip
+/opt/rocm/lib/llvm/bin/clang++ --offload-arch=gfx950 ... main.cpp.o device_info.cpp.o -o vadd_app libvadd_kernels.a .../libamdhip64.so...
+```
+
+Notice that the final link is done by ROCm clang, not `g++`. `vadd_app` has only `.cpp` sources, but it links a static library that contains HIP objects. CMake chooses the linker language with the highest preference across the target and its static dependencies, so here it picks HIP.
+
+How CMake finds the pieces:
+
+| What | How it is found | Override |
+|---|---|---|
+| HIP compiler | `HIPCXX` env var, else `hipconfig --hipclangpath`, else `clang++` on `PATH` | `-DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++` (must be clang, not `hipcc`) |
+| HIP language runtime glue | `hip-lang-config.cmake`, located relative to the compiler's ROCm root | `-DCMAKE_HIP_COMPILER_ROCM_ROOT=/opt/rocm-7.0.2` (described by ROCm as a "last resort") |
+| Platform | `hipconfig --platform` | `-DCMAKE_HIP_PLATFORM=amd` or `nvidia` (3.28+) |
+| Architectures | Your `CMAKE_HIP_ARCHITECTURES`, else `rocm_agent_enumerator` on the build machine, else the compiler default | `-DCMAKE_HIP_ARCHITECTURES="gfx90a;gfx942"` or the `HIP_ARCHITECTURES` target property |
+
+**Pitfall: architecture auto-detection.** If you leave `CMAKE_HIP_ARCHITECTURES` unset, the result depends on the machine that builds:
+
+- A CI runner without a GPU falls back to the compiler's default architecture.
+- A developer's MI300X box produces a binary that runs only on gfx942.
+- On an 8-GPU node, CMake 4.2 cached `gfx950;gfx950;...` (eight copies, one per GPU). The build still worked, but the compile line got eight identical `--offload-arch` flags.
+
+Always pass the list explicitly, in a preset or on the command line. A binary missing the right code object fails at the first kernel launch. On the nightly above, a gfx942-only build on gfx950 failed with `device kernel image is invalid` at `hipGetLastError()`. Older ROCm releases report `hipErrorNoBinaryForGpu: Unable to find code object for all current devices!`.
+
+**Feature-qualified targets.** An architecture can carry target features, for example `gfx90a:xnack+` or `gfx90a:xnack-`. A plain `gfx90a` builds code that works in either XNACK mode. Use a feature-qualified target when you need a specific mode, such as `xnack+` for unified-memory page migration on MI200.
+
+## 64.3 Compiling `.cpp` or `.cu` Files as HIP
+
+CMake associates `.hip` with the HIP language automatically. Many codebases keep kernels in `.cpp`, or have hipified CUDA code still named `.cu`. Override the language per source:
+
+```cmake
+# fragment
+add_library(kernels STATIC src/gemm.cpp src/reduce.cu src/host_util.cpp)
+set_source_files_properties(src/gemm.cpp src/reduce.cu PROPERTIES LANGUAGE HIP)
+# host_util.cpp stays CXX and is compiled by the host compiler
+```
+
+Gotchas:
+
+- **Source file properties are directory-scoped.** They are visible only to targets created in the same `CMakeLists.txt` directory. When the target lives in another directory, use `set_source_files_properties(... TARGET_DIRECTORY kernels PROPERTIES LANGUAGE HIP)` (3.18+).
+- **Header-only device code** (`__device__` functions in a `.hpp`) needs no property. It is compiled as HIP wherever a HIP translation unit includes it.
+- **Relocatable device code.** There is no `HIP_SEPARABLE_COMPILATION` property; that is the CUDA name. Add the compile option `$<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>` to **every** target that has RDC HIP sources, and the link options `-fgpu-rdc --hip-link` to the **final executable or shared library** that performs the device link. For the STATIC `kernels` library above, that means `target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)` plus `target_link_options(kernels INTERFACE -fgpu-rdc --hip-link)`, so the link options propagate to whatever links `kernels`. **Warning:** CMake ignores `LINK_OPTIONS` when it archives a static library, so `target_link_options(kernels PRIVATE -fgpu-rdc --hip-link)` is silently dropped. The host link succeeds with no device link, and the application crashes (segfault, exit 139) at the first kernel launch instead of failing at link time. Device-side linking slows the build, and you need it only when a kernel calls `__device__` functions defined in another translation unit. Without the flag, the device link fails with `ld.lld: error: undefined hidden symbol: twice(int)`. The message comes from the device-code linker (lld), not the host `ld`.
+
+## 64.4 Finding ROCm: `CMAKE_PREFIX_PATH`, `hip::host`, `hip::device`
+
+ROCm installs its package configs under `<rocm>/lib/cmake/<pkg>/`, for example `/opt/rocm/lib/cmake/hip/hip-config.cmake`. `find_package` searches `<prefix>/lib/cmake/<name>*/` for every prefix in `CMAKE_PREFIX_PATH`, so one prefix finds all of ROCm:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/rocm            # default install
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/rocm-7.0.2      # a specific side-by-side version
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$ROCM_PATH"         # convention used by ROCm tooling and CI
+```
+
+`/opt/rocm` is normally a symlink to the active `/opt/rocm-X.Y.Z`. Pin the versioned path in CI so that an upgrade does not silently change what you build against. Run `cmake --debug-find-pkg=hip` to see every directory CMake tried.
+
+What `find_package(hip)` provides, as defined in `hip-config-amd.cmake`:
+
+| Target | Usage requirements | Use for |
+|---|---|---|
+| `hip::host` | `__HIP_PLATFORM_AMD__=1`, the ROCm include dir, link to `libamdhip64` | Host-only TUs that call `hipMalloc`/`hipMemcpy`/`hipGetDeviceCount` and can be compiled by `g++` |
+| `hip::device` | `hip::host` + `-x hip` + `--offload-arch=<each GPU_TARGETS entry>` + `--hip-link` at link time | The legacy CXX-language flow. Requires `CMAKE_CXX_COMPILER` to be ROCm clang |
+| `hip::amdhip64` | The runtime shared library itself | Rarely used directly |
+
+The legacy CXX flow:
+
+```cmake
+# fragment -- configure with -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
+cmake_minimum_required(VERSION 3.21...4.2)
+project(legacy LANGUAGES CXX)
+
+set(GPU_TARGETS "gfx90a;gfx942" CACHE STRING "AMD GPU targets")  # BEFORE find_package(hip)
+find_package(hip REQUIRED)
+
+add_executable(app main.cpp kernels.cpp)
+target_link_libraries(app PRIVATE hip::device)   # PRIVATE! See the pitfall below.
+```
+
+Pitfalls specific to `hip::device`:
+
+- **Its flags are usage requirements.** `target_link_libraries(mylib PUBLIC hip::device)` makes every consumer of `mylib` compile all of its `.cpp` files with `-x hip`. That is slow, and it breaks consumers that use `g++`. Link it `PRIVATE`, and expose only `hip::host` publicly if your headers need HIP runtime types.
+- **`GPU_TARGETS` is read when `find_package(hip)` runs.** Setting it afterwards has no effect, because the `--offload-arch` flags are already attached to `hip::device`.
+- **`AMDGPU_TARGETS` is deprecated.** ROCm 6.4's release notes say "CMake variable AMDGPU_TARGETS is deprecated. Use GPU_TARGETS instead." If only `AMDGPU_TARGETS` is defined, `hip-config` issues an author warning and copies it into `GPU_TARGETS`. Projects that support old ROCm releases (rocBLAS, for example) set both.
+- **Auto-detection.** If `GPU_TARGETS` is unset, `hip-config` runs `amdgpu-arch` (older releases used `rocm_agent_enumerator`). This has the same CI hazard as with the HIP language.
+- **Mixing the two flows.** If your project uses the HIP language but also consumes ROCm libraries whose configs read `GPU_TARGETS`, set `GPU_TARGETS` to `${CMAKE_HIP_ARCHITECTURES}` before the `find_package` calls. AMD maintainers recommend this so that both mechanisms agree.
+
+## 64.5 Linking ROCm Libraries and Profiler SDKs
+
+Every modern ROCm component ships a config package with namespaced imported targets. Link the target and never hand-write `-lrocblas -I/opt/rocm/include`. The table is from the ROCm "Using CMake" guide, with the profiler entries checked against a rocprofiler-sdk 1.4 install:
+
+| Component | `find_package(...)` | Imported target(s) |
+|---|---|---|
+| HIP runtime | `hip` | `hip::host`, `hip::device` |
+| rocBLAS / hipBLAS | `rocblas` / `hipblas` | `roc::rocblas` / `roc::hipblas` |
+| rocPRIM / rocThrust / hipCUB | `rocprim` / `rocthrust` / `hipcub` | `roc::rocprim` / `roc::rocthrust` / `hip::hipcub` |
+| rocFFT / hipFFT | `rocfft` / `hipfft` | `roc::rocfft` / `hip::hipfft` |
+| rocRAND / rocSPARSE / rocSOLVER | `rocrand` / `rocsparse` / `rocsolver` | `roc::rocrand` / `roc::rocsparse` / `roc::rocsolver` |
+| RCCL | `rccl` | `roc::rccl` (the ROCm "Using CMake" doc table says `rccl`, but the installed `rccl-targets.cmake` exports only `roc::rccl`) |
+| MIOpen | `miopen` | `MIOpen` |
+| ROCprofiler-SDK | `rocprofiler-sdk` | `rocprofiler-sdk::rocprofiler-sdk` |
+| ROCTx markers (SDK) | `rocprofiler-sdk-roctx` | `rocprofiler-sdk-roctx::rocprofiler-sdk-roctx` |
+| roctracer (deprecated) | historically **no config package** | Write a Find module (below) or migrate to rocprofiler-sdk |
+
+Note the inconsistent namespaces (`roc::`, `hip::`, none). Always check `<rocm>/lib/cmake/<pkg>/*-targets.cmake` for the exact names: `grep 'add_library(' /opt/rocm/lib/cmake/rocblas/*targets*.cmake`.
+
+**A rocprofiler-sdk tool library.** Tools are shared libraries that the SDK loads into the application process, through `ROCP_TOOL_LIBRARIES` or `rocprofv3`. The SDK looks up the symbol `rocprofiler_configure` by name. The following was built and run against the same nightly:
+
+```cmake
+cmake_minimum_required(VERSION 3.21...4.2)
+project(my_rocp_tool LANGUAGES CXX)
+include(GNUInstallDirs)
+
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)   # export nothing by accident (Section 67)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+find_package(rocprofiler-sdk REQUIRED)    # <rocm>/lib/cmake/rocprofiler-sdk/
+
+add_library(my_rocp_tool SHARED tool.cpp)
+target_compile_features(my_rocp_tool PRIVATE cxx_std_17)
+target_link_libraries(my_rocp_tool PRIVATE rocprofiler-sdk::rocprofiler-sdk)
+target_link_options(my_rocp_tool PRIVATE "LINKER:--no-undefined")  # fail at link, not at dlopen
+set_target_properties(my_rocp_tool PROPERTIES INSTALL_RPATH "$ORIGIN")  # Section 65
+install(TARGETS my_rocp_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+```
+
+```cpp
+// tool.cpp
+#include <rocprofiler-sdk/registration.h>
+#include <cstdio>
+
+namespace {
+int tool_init(rocprofiler_client_finalize_t, void*) {
+  std::fprintf(stderr, "[my_rocp_tool] initialized\n");
+  return 0;  // 0 = success
+}
+void tool_fini(void*) { std::fprintf(stderr, "[my_rocp_tool] finalized\n"); }
+}  // namespace
+
+// The SDK finds this symbol by name in every tool library. Its declaration in
+// registration.h carries ROCPROFILER_PUBLIC_API (visibility("default")), so it
+// stays exported even though the rest of this .so is hidden.
+extern "C" rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t /*version*/, const char* /*runtime_version*/,
+                      uint32_t /*priority*/, rocprofiler_client_id_t* id) {
+  id->name = "my_rocp_tool";
+  static rocprofiler_tool_configure_result_t cfg{
+      sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini,
+      nullptr};
+  return &cfg;
+}
+```
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm && cmake --build build
+nm -DC --defined-only build/libmy_rocp_tool.so      # -> only: T rocprofiler_configure
+ROCP_TOOL_LIBRARIES=$PWD/build/libmy_rocp_tool.so ./vadd_app
+```
+
+**roctracer without a config package.** MIOpen issue #2511 reports `find_dependency(roctracer)` failing because `roctracer-config.cmake` did not exist. roctracer and rocprofiler v1/v2 are being phased out in favour of rocprofiler-sdk. If you must still link roctracer, wrap it in an imported target so that the rest of the build stays target-based:
+
+```cmake
+# cmake/Findroctracer.cmake
+find_path(roctracer_INCLUDE_DIR roctracer/roctracer.h
+          HINTS ENV ROCM_PATH PATH_SUFFIXES include)
+find_library(roctracer_LIBRARY NAMES roctracer64
+             HINTS ENV ROCM_PATH PATH_SUFFIXES lib lib64)
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(roctracer
+    REQUIRED_VARS roctracer_LIBRARY roctracer_INCLUDE_DIR)
+
+if(roctracer_FOUND AND NOT TARGET roctracer::roctracer)
+  add_library(roctracer::roctracer SHARED IMPORTED)
+  set_target_properties(roctracer::roctracer PROPERTIES
+      IMPORTED_LOCATION             "${roctracer_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${roctracer_INCLUDE_DIR}")
+endif()
+mark_as_advanced(roctracer_INCLUDE_DIR roctracer_LIBRARY)
+```
+
+Section 29 covers the `FindXxx` pattern in general.
+
+## 64.6 CUDA vs HIP in CMake
+
+| Concern | CUDA language | HIP language |
+|---|---|---|
+| Enable | `project(p LANGUAGES CXX CUDA)` / `enable_language(CUDA)` | `project(p LANGUAGES CXX HIP)` / `enable_language(HIP)` |
+| Min CMake | 3.8 (first-class) | 3.21 (AMD); 3.28 for HIP-on-NVIDIA |
+| Compiler | `nvcc` (or clang) via `CMAKE_CUDA_COMPILER` / `CUDACXX` | ROCm `clang++` via `CMAKE_HIP_COMPILER` / `HIPCXX` (never `hipcc`) |
+| File extension | `.cu` | `.hip` |
+| Architectures | `CMAKE_CUDA_ARCHITECTURES` = `80;90` (`sm_` numbers); `native` (3.24), `all`/`all-major` (3.23) | `CMAKE_HIP_ARCHITECTURES` = `gfx90a;gfx942` (gfx names); default from `rocm_agent_enumerator` |
+| Arch env var | `CUDAARCHS` | none on AMD (`CUDAARCHS` is honoured when `CMAKE_HIP_PLATFORM=nvidia`) |
+| Runtime target | `find_package(CUDAToolkit)` -> `CUDA::cudart` | Implicit for HIP-language targets; `find_package(hip)` -> `hip::host` for C++ TUs |
+| Math libraries | `CUDA::cublas`, `CUDA::cufft` | `roc::rocblas`/`roc::hipblas`, `roc::rocfft`/`hip::hipfft` |
+| Relocatable device code | `CUDA_SEPARABLE_COMPILATION ON` | `-fgpu-rdc` compile + link options (no property) |
+| Platform selection | n/a | `CMAKE_HIP_PLATFORM=amd|nvidia` (3.28+) |
+
+Porting a CUDA CMake project means renaming or relabelling the sources (`.cu` -> `.hip`, or `LANGUAGE HIP`), swapping `CUDA` for `HIP` in `project()` and in the `*_ARCHITECTURES`/`*_STANDARD` variables, and replacing `CUDA::` targets with their ROCm equivalents. Run `hipify-perl`/`hipify-clang` on the source itself; see the porting link at the top of this section.
+
+---
+
+# 65. RPATH and RUNPATH
+
+> See also: [Static vs dynamic linking](../languages/Cpp_Fundamentals.md#134-static-vs-dynamic-linking), [Debugging and Profiling Tools](Debugging_and_Profiling_Tools.md), [Linux Command Line](Linux_Command_Line.md), Section 39 (SOVERSION) and Section 37 (GNUInstallDirs).
+
+---
+
+## 65.1 How the Dynamic Loader Finds a Library
+
+A dynamically linked ELF executable records the names of the libraries it needs, not their paths. `readelf -d app` shows `NEEDED libgreet.so.1`. At startup, `ld.so` resolves each `NEEDED` entry by searching, in order (see `man ld.so`):
+
+1. **`DT_RPATH`** of the object that needs the library, then of the objects that loaded it, up to the executable. This step is skipped if the object also has `DT_RUNPATH`.
+2. **`LD_LIBRARY_PATH`**. It is ignored for setuid/setgid binaries.
+3. **`DT_RUNPATH`** of the object that needs the library. It applies only to that object's own direct dependencies.
+4. **`/etc/ld.so.cache`**, built by `ldconfig` from `/etc/ld.so.conf.d/*`.
+5. **Default directories**: `/lib`, `/usr/lib`, and the `lib64` and multiarch variants.
+
+| | `DT_RPATH` (old) | `DT_RUNPATH` (new) |
+|---|---|---|
+| Linker flag | `-Wl,-rpath,DIR -Wl,--disable-new-dtags` | `-Wl,-rpath,DIR` (most distros default to `--enable-new-dtags`) |
+| Priority vs `LD_LIBRARY_PATH` | Higher. The user **cannot** override it | Lower. The user **can** override it |
+| Applies to | The object, plus libraries loaded on its behalf (inherited down the chain) | Only the object's own `DT_NEEDED` entries |
+| Status | Deprecated but still honoured | Current default |
+
+The **transitive trap**, reproduced with GCC 15 and binutils on Ubuntu:
+
+```text
+app  (RUNPATH $ORIGIN/lib)  ->  lib/liba.so (no runpath)  ->  lib/libb.so
+
+$ ./app_runpath
+./app_runpath: error while loading shared libraries: libb.so: cannot open shared object file: No such file or directory
+$ ./app_rpath           # same link, but -Wl,--disable-new-dtags
+7
+```
+
+The executable's `RUNPATH` finds `liba.so`. When `liba.so` asks for `libb.so`, only **`liba.so`'s own** runpath is consulted, and it has none. Under the old `RPATH` semantics, the executable's path was inherited. The fix is to give every shared library its own `$ORIGIN`-relative runpath. Do not switch back to `RPATH`.
+
+**`$ORIGIN`** expands at load time to the directory that contains the object being loaded. That makes an install tree **relocatable**: `bin/app` with `RUNPATH $ORIGIN/../lib` works whether the tree is unpacked to `/opt/foo`, `$HOME/foo`, or inside a container. ROCm uses this pattern. In a rocprofiler-sdk 1.4 install, `lib/librocprofiler-sdk.so.1` has `RUNPATH [$ORIGIN]`, and the tool plugins in `lib/rocprofiler-sdk/` have `[$ORIGIN:$ORIGIN/..]`.
+
+`dlopen("libfoo.so")` uses the same search. The runpath consulted is that of the object **calling** `dlopen`, which matters for plugin loaders and profiler tools.
+
+## 65.2 CMake's Model: Build RPATH vs Install RPATH
+
+CMake gives every binary two runpaths:
+
+- **Build RPATH.** It is set automatically at link time and contains the absolute directories of every shared library the binary links from the build tree (and outside it). This is why `./build/app` and `ctest` work without `LD_LIBRARY_PATH`.
+- **Install RPATH.** It is written into the copy installed by `cmake --install`. CMake **edits the ELF in place** at install time, with its built-in chrpath. It does not relink. To make room for the edit, CMake pads the build RPATH at link time, which is why you see trailing colons in it.
+
+The default install RPATH is **empty**. Without configuration, an installed binary keeps no path to your libraries.
+
+```text
+$ readelf -d build/app | grep RUNPATH
+ 0x000000000000001d (RUNPATH)  Library runpath: [/tmp/cmk/build:]        <- absolute, padded
+$ readelf -d inst/bin/app | grep RUNPATH
+ 0x000000000000001d (RUNPATH)  Library runpath: [$ORIGIN/../lib]         <- after install
+```
+
+| Variable (initialises the target property) | Effect | Typical use |
+|---|---|---|
+| `CMAKE_INSTALL_RPATH` -> `INSTALL_RPATH` | The runpath written at install time. **Default: empty** | `$ORIGIN/../lib` for relocatable packages |
+| `CMAKE_INSTALL_RPATH_USE_LINK_PATH` -> `INSTALL_RPATH_USE_LINK_PATH` | Appends to the install RPATH every directory **outside the project** that was linked from, e.g. `/opt/rocm/lib` | Installing on the same machine against non-system deps. Produces absolute, non-relocatable paths |
+| `CMAKE_BUILD_RPATH` -> `BUILD_RPATH` | Extra entries for the build tree (CMake adds the linked dirs automatically) | Rare: runtime-only dirs such as plugins |
+| `CMAKE_SKIP_BUILD_RPATH` | No RPATH at all in the build tree | Hermetic builds. Tests then need `LD_LIBRARY_PATH` or the `ENVIRONMENT` test property |
+| `CMAKE_BUILD_WITH_INSTALL_RPATH` -> `BUILD_WITH_INSTALL_RPATH` | Use the install RPATH already at build time, so no edit at install | When the build tree mirrors the install layout, or for cross-compiling |
+| `CMAKE_BUILD_RPATH_USE_ORIGIN` -> `BUILD_RPATH_USE_ORIGIN` (3.14) | Build RPATH uses `$ORIGIN`-relative paths, e.g. `[$ORIGIN:::::::]` | Reproducible builds: no absolute build path baked in |
+| `CMAKE_SKIP_INSTALL_RPATH` / `CMAKE_SKIP_RPATH` | Strip the install RPATH / disable RPATH entirely | Distro packages (Debian policy discourages RPATH) |
+| `INSTALL_REMOVE_ENVIRONMENT_RPATH` (3.16) | Drop toolchain-injected RPATH entries at install | Spack/conda toolchains |
+
+## 65.3 The Recommended Relocatable Setup
+
+```cmake
+# fragment -- top-level CMakeLists.txt, BEFORE any add_library/add_executable
+include(GNUInstallDirs)
+
+# Path from bin/ to lib/ (handles lib vs lib64 vs lib/x86_64-linux-gnu).
+file(RELATIVE_PATH _bin_to_lib
+     "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBDIR}")
+
+if(APPLE)
+  set(CMAKE_INSTALL_RPATH "@loader_path/${_bin_to_lib}")   # macOS equivalent
+else()
+  set(CMAKE_INSTALL_RPATH "$ORIGIN/${_bin_to_lib}")        # -> $ORIGIN/../lib
+endif()
+
+# Libraries in lib/ that depend on siblings in lib/ need their own entry
+# (RUNPATH is not inherited):
+#   set_target_properties(mylib PROPERTIES INSTALL_RPATH "$ORIGIN")
+```
+
+Notes:
+
+- **Quoting.** `"$ORIGIN"` is not CMake variable syntax, because CMake variables are `${...}`. CMake escapes it correctly for Make and Ninja and in `cmake_install.cmake` (policy CMP0095). Do not write `\$ORIGIN` or `$$ORIGIN` yourself.
+- **Set the variable before the targets are created.** `CMAKE_INSTALL_RPATH` initialises each target's `INSTALL_RPATH` property at `add_*` time.
+- **External dependencies such as `/opt/rocm/lib`.** The choice is policy:
+  - Use `INSTALL_RPATH_USE_LINK_PATH ON` to bake in the absolute path (easy, not relocatable).
+  - Rely on `ld.so.conf.d`. The ROCm Linux install guide's post-install step adds `/opt/rocm/lib` to an `/etc/ld.so.conf.d/rocm.conf` file and then runs `ldconfig`.
+  - Have the launcher script set `LD_LIBRARY_PATH`.
+  - Bundle the libraries next to yours with `$ORIGIN`, as auditwheel does (Section 66.5).
+- **Python extensions.** A module in `site-packages/pkg/` that ships helper `.so` files uses `INSTALL_RPATH "$ORIGIN"` or `"$ORIGIN/lib"`.
+
+## 65.4 Diagnosing "cannot open shared object file"
+
+```text
+./app: error while loading shared libraries: libgreet.so.1: cannot open shared object file: No such file or directory
+```
+
+```bash
+ldd ./app                               # which NEEDED entries resolve where; "not found" is the culprit
+readelf -d ./app | grep -E 'NEEDED|RPATH|RUNPATH'   # what the binary asks for and where it looks
+LD_DEBUG=libs ./app 2>&1 | grep -A3 libgreet       # loader's actual search, path by path
+readelf -d $(ldd ./app | awk '/libfoo/{print $3}') | grep RUNPATH   # transitive: check the *intermediate* lib
+objdump -p ./app | grep -E 'RPATH|RUNPATH'          # same info, different tool
+patchelf --print-rpath ./app            # and --set-rpath '$ORIGIN/../lib' for a quick experiment
+```
+
+Decision list:
+
+| Observation | Cause | Fix |
+|---|---|---|
+| Works in `build/`, fails after `cmake --install` | Install RPATH empty (the default) | `CMAKE_INSTALL_RPATH "$ORIGIN/../lib"` |
+| Works on your machine, fails when the tarball is moved | Absolute install RPATH from `INSTALL_RPATH_USE_LINK_PATH` or hardcoded paths | Use `$ORIGIN`-relative paths |
+| App finds `liba.so`, but `libb.so` (needed by `liba`) is "not found" | `RUNPATH` is not inherited | Give `liba` its own `INSTALL_RPATH "$ORIGIN"` |
+| A different version of the library is loaded | `LD_LIBRARY_PATH` overrides `RUNPATH`, or an `ld.so.cache` entry wins | Check `LD_DEBUG=libs`; unset stray `LD_LIBRARY_PATH` (common with multiple ROCm installs) |
+| `ldd` OK, `dlopen` of a plugin fails | The runpath of the object calling `dlopen` lacks the plugin's deps | Give the plugin its own RUNPATH, or `dlopen` an absolute path |
+| `version 'GLIBCXX_3.4.32' not found` | Built with a newer libstdc++ than the runtime system has | Build on the oldest target distro (manylinux), or ship libstdc++ |
+
+`ldd` executes the loader logic and, for some binaries, can run code. Prefer `readelf -d` and `LD_DEBUG` on untrusted binaries.
+
+---
+
+# 66. Building Python Extensions
+
+> See also: [Python modules, packages and imports](../languages/Python_Fundamentals.md#18-modules-packages--import-system), [Python Libraries](../languages/Python_Libraries.md), [Containers and CI](Containers_and_CI.md) (cibuildwheel and manylinux images in CI).
+
+---
+
+## 66.1 What an Extension Module Is
+
+A CPython extension is a shared library with a special name, such as `_core.cpython-312-x86_64-linux-gnu.so`, that exports one symbol: `PyInit__core`. The interpreter `dlopen`s it on `import`. Four rules follow:
+
+1. **The filename suffix must match the interpreter's ABI tag** (`python -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))"`). The exception is stable-ABI modules (`_core.abi3.so`), which one build can serve for every CPython at or above a minimum version.
+2. **On Linux, do not link `libpython`.** The `Py*` symbols are left undefined and are resolved from the already-loaded interpreter. Many interpreters (manylinux images, conda, Debian/Ubuntu system Python, and source builds configured without `--enable-shared`) link `libpython` statically into the `python` executable, so linking `libpython.so` would load a **second** interpreter runtime. A verified pybind11 module had 116 undefined `Py*` symbols and no `libpython` in `NEEDED`. For the same reason, never add `-Wl,--no-undefined` to Python modules.
+3. **Export only `PyInit_<name>`.** pybind11 and nanobind compile with hidden visibility so that two extensions bundling different copies of a library cannot clash.
+4. **Build against the target interpreter.** Point CMake at the right interpreter with `-DPython_EXECUTABLE=$(which python)`. A mismatch causes `ImportError: ... undefined symbol` or a silent wrong suffix.
+
+## 66.2 FindPython Components
+
+```cmake
+# fragment
+find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+```
+
+| Component | Since | Provides | Use |
+|---|---|---|---|
+| `Interpreter` | 3.12 | `Python_EXECUTABLE`, `Python::Interpreter` | Running scripts at build time |
+| `Development.Module` | 3.18 | `Python::Module`, which does **not** link libpython on Linux | **Extension modules** |
+| `Development.SABIModule` | 3.26 | `Python::SABIModule` (`abi3`) | Stable-ABI extension modules |
+| `Development.Embed` | 3.18 | `Python::Python`, which links libpython | **Embedding** Python in a C++ app |
+| `Development` | 3.12 | Module + Embed | Avoid: requires libpython to be present even for modules |
+| `NumPy` | 3.14 | `Python::NumPy` (include dir) | Using the NumPy C API |
+
+Use `FindPython` (3.12+), not the deprecated `FindPythonInterp`/`FindPythonLibs`. The latter could pick an interpreter and a library from **different** Pythons. `FindPython3` is the same module, with `Python3_` prefixes.
+
+Without a binding library:
+
+```cmake
+# fragment
+Python_add_library(_core MODULE WITH_SOABI src/core.c)          # -> _core.cpython-312-...so
+Python_add_library(_core MODULE USE_SABI 3.12 WITH_SOABI src/core.c)  # 3.26+: Py_LIMITED_API, abi3
+```
+
+The `USE_SABI` form needs the `Development.SABIModule` component. With only `Development.Module` requested, configure fails with `Python_ADD_LIBRARY: dependent target 'Python::SABIModule' is not defined`. Request it explicitly; the result is `_core.abi3.so`:
+
+```cmake
+# fragment
+find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
+```
+
+## 66.3 pybind11 with scikit-build-core: A Complete Package
+
+The modern Python packaging flow follows PEP 517/518/621. `pip install .` reads `pyproject.toml`, creates an isolated build environment containing `build-system.requires`, and calls the **build backend**. **scikit-build-core** is a backend that runs CMake and packs the installed files into a wheel. It replaces the old `setup.py` + scikit-build approach.
+
+```text
+fastmath/
+|-- pyproject.toml
+|-- CMakeLists.txt
+`-- src/
+    |-- cpp/core.cpp
+    `-- fastmath/__init__.py
+```
+
+```toml
+# pyproject.toml
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fastmath"
+version = "0.1.0"
+requires-python = ">=3.9"
+
+[tool.scikit-build]
+minimum-version = "0.10"          # opt in to current scikit-build-core defaults
+cmake.version = ">=3.26"
+cmake.build-type = "Release"
+build-dir = "build/{wheel_tag}"   # persistent dir -> incremental rebuilds
+wheel.packages = ["src/fastmath"] # pure-Python part of the package
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26...4.2)
+project(${SKBUILD_PROJECT_NAME} VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES CXX)
+
+set(PYBIND11_FINDPYTHON ON)                 # use CMake's FindPython
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(pybind11 CONFIG REQUIRED)      # found in the isolated build env
+
+pybind11_add_module(_core MODULE src/cpp/core.cpp)
+target_compile_features(_core PRIVATE cxx_std_17)
+
+# Lands next to src/fastmath/__init__.py inside the wheel.
+install(TARGETS _core LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
+```
+
+```cpp
+// src/cpp/core.cpp
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#include <numeric>
+#include <stdexcept>
+#include <vector>
+
+namespace py = pybind11;
+
+double mean(const std::vector<double>& v) {
+  if (v.empty()) throw std::invalid_argument("mean() of empty sequence");
+  return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
+}
+
+PYBIND11_MODULE(_core, m) {
+  m.doc() = "C++ kernels for fastmath";
+  // The GIL is released while the C++ loop runs (no Python objects touched).
+  m.def("mean", &mean, py::arg("values"),
+        py::call_guard<py::gil_scoped_release>(),
+        "Arithmetic mean of a sequence of floats");
+}
+```
+
+```python
+# src/fastmath/__init__.py
+from ._core import mean
+
+__all__ = ["mean"]
+```
+
+```bash
+pip install .                                   # build + install (isolated env)
+python -m build --wheel                         # -> dist/fastmath-0.1.0-cp312-cp312-linux_x86_64.whl
+pip install --no-build-isolation -e . \
+    -Ceditable.rebuild=true -Cbuild-dir=build   # dev loop: rebuilds C++ on import
+python -c "import fastmath; print(fastmath.mean([1, 2, 3, 4]))"   # 2.5
+```
+
+The package was verified with scikit-build-core 1.1, pybind11 3.1, CMake 4.2 and CPython 3.14. `fastmath.mean([])` raises `ValueError`, because pybind11 translates `std::invalid_argument` into `ValueError`.
+
+What `pybind11_add_module` does for you:
+
+- Sets the correct `EXT_SUFFIX`.
+- Uses hidden visibility.
+- Links `Python::Module`, not libpython.
+- In Release builds, adds LTO and strips the module unless you pass `NO_EXTRAS`.
+
+How scikit-build-core helps:
+
+- It passes `SKBUILD_PROJECT_NAME`/`SKBUILD_PROJECT_VERSION`.
+- It points CMake at the build environment's `site-packages`, so `find_package(pybind11 CONFIG)` works without hints.
+- It downloads CMake/Ninja from PyPI if the system copies are too old.
+
+## 66.4 nanobind
+
+nanobind is by the author of pybind11. It produces smaller binaries, compiles faster, has lower call overhead, and supports building for the stable ABI. The trade-off is a narrower feature set, for example less implicit conversion magic.
+
+```cmake
+cmake_minimum_required(VERSION 3.26...4.2)
+project(nbdemo LANGUAGES CXX)
+
+find_package(Python 3.9 REQUIRED
+             COMPONENTS Interpreter Development.Module
+             OPTIONAL_COMPONENTS Development.SABIModule)
+
+# Ask the active interpreter where nanobind's CMake config lives
+# (scikit-build-core makes this step unnecessary).
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+  OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_ROOT)
+find_package(nanobind CONFIG REQUIRED)
+
+# NB_STATIC: link libnanobind statically into this module.
+# STABLE_ABI: build one abi3 module for CPython >= 3.12 (ignored on older Pythons).
+nanobind_add_module(_core NB_STATIC STABLE_ABI core.cpp)
+```
+
+```cpp
+// core.cpp
+#include <nanobind/nanobind.h>
+
+namespace nb = nanobind;
+
+int add(int a, int b) { return a + b; }
+
+NB_MODULE(_core, m) {
+  m.def("add", &add, nb::arg("a"), nb::arg("b") = 1);
+}
+```
+
+Built with nanobind 3.1 on CPython 3.14, this produces `_core.abi3.so`, and `_core.add(2)` returns `3`. Under scikit-build-core, set `wheel.py-api = "cp312"` so that the wheel is tagged `cp312-abi3`. One wheel then covers CPython 3.12 and later.
+
+| | pybind11 | nanobind | Raw C API / `Python_add_library` |
+|---|---|---|---|
+| Binary size and compile time | Larger, slower | Several times smaller and faster to compile (per nanobind's own benchmarks) | Smallest |
+| Stable ABI (abi3) | No (not supported as of pybind11 3.x) | Yes (`STABLE_ABI`, 3.12+) | Yes (`USE_SABI`) |
+| STL/Eigen/NumPy conversions | Broadest | Good (ndarray-centric) | Manual |
+| Typical use | Existing codebases, max features | New projects, ML infra | Tiny modules |
+
+## 66.5 Wheels, manylinux, and auditwheel
+
+A wheel built on your workstation is tagged `linux_x86_64`. PyPI rejects that tag, because it promises nothing about the target system. **manylinux** (PEP 600) tags are a promise: `manylinux_2_28_x86_64` means the wheel works on any x86-64 Linux with **glibc >= 2.28** and needs only a small allow-list of system libraries (libc, libm, libstdc++ with old symbol versions, libgcc_s, libpthread, ...).
+
+Why you must build on an **old** distro: the linker records the newest symbol version used, for example `GLIBC_2.32` or `GLIBCXX_3.4.29`, and those can only increase. Checking the fastmath wheel built on a current Ubuntu:
+
+```text
+$ auditwheel show dist/fastmath-0.1.0-cp314-cp314-linux_x86_64.whl
+fastmath-0.1.0-cp314-cp314-linux_x86_64.whl is consistent with the
+following platform tag: "manylinux_2_39_x86_64".
+The wheel references external versioned symbols in these
+system-provided shared libraries: libc.so.6 with versions
+{'GLIBC_2.14', 'GLIBC_2.4', 'GLIBC_2.32', 'GLIBC_2.2.5'}, ...
+```
+
+`manylinux_2_39` excludes every distro with glibc older than 2.39 (RHEL 8/9, Ubuntu 22.04, ...). The fix is to build inside the official image, for example `quay.io/pypa/manylinux_2_28_x86_64` (AlmaLinux 8). Its gcc-toolset links newer libstdc++ features statically, so you get a modern compiler while depending only on old symbol versions.
+
+The pipeline:
+
+```bash
+# Inside the manylinux container (cibuildwheel automates exactly this loop)
+for PY in /opt/python/cp3{10,11,12,13}-*/bin/python; do
+  "$PY" -m build --wheel --outdir wheelhouse_raw .
+done
+auditwheel show   wheelhouse_raw/*.whl     # which tag is achievable, which libs are external
+auditwheel repair wheelhouse_raw/*.whl -w wheelhouse/ --plat manylinux_2_28_x86_64
+```
+
+`auditwheel repair`:
+
+1. Copies every non-allow-listed shared library the extension needs into `<pkg>.libs/`, renaming each to `libfoo-<hash>.so` to avoid clashes with other wheels.
+2. Rewrites `DT_NEEDED` and sets RUNPATH to `$ORIGIN/../<pkg>.libs` using patchelf, which is the Section 65 technique.
+3. Retags the wheel.
+
+**GPU libraries are the exception.** Driver-coupled libraries must not be vendored, because they have to match the installed driver/runtime:
+
+- `libcuda.so.1` belongs to the driver.
+- `libamdhip64.so.N` comes from the ROCm runtime, and the KFD/driver interface must match.
+
+The options are:
+
+- Exclude them. `auditwheel repair --exclude libamdhip64.so.7 ...` breaks the strict manylinux contract, so document the system requirement. Recent auditwheel versions accept glob patterns.
+- Vendor the whole runtime, as PyTorch's ROCm wheels do. The wheels become multi-GB.
+- Depend on separately packaged runtime wheels.
+
+```toml
+# pyproject.toml -- cibuildwheel configuration (fragment)
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-*"
+skip = "*-musllinux*"
+manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.linux]
+repair-wheel-command = "auditwheel repair --exclude libamdhip64.so.7 -w {dest_dir} {wheel}"
+```
+
+---
+
+# 67. Symbol Visibility and Export Control
+
+> See also: Section 39 (ABI and SOVERSION; the Windows `dllexport` side of `GenerateExportHeader`), [Static vs dynamic linking](../languages/Cpp_Fundamentals.md#134-static-vs-dynamic-linking).
+
+---
+
+## 67.1 Why Default Visibility Is a Problem
+
+On ELF platforms, every function and global with external linkage in a shared library is **exported by default**, including emitted inline functions and template instantiations (as weak `W` symbols). Windows is the opposite: nothing is exported without `__declspec(dllexport)`. Exporting everything has costs:
+
+| Cost | Why |
+|---|---|
+| Accidental ABI | Every internal helper becomes something a consumer can link against, so you can never change it without a SOVERSION bump |
+| Slower load and calls | Larger `.dynsym`, more relocations, and slower symbol lookup at load time. Exported functions are **interposable**, so GCC will not inline them or otherwise optimise calls to them, even within the same TU, and calls go through the PLT (`call _Z1gi@PLT` at `-O2 -fPIC`). Hidden visibility or `-fno-semantic-interposition` removes this; Clang assumes no interposition by default |
+| Symbol clashes | Two libraries in one process that both export `llvm::...` or `google::protobuf::...` (different versions) bind to whichever copy loaded first. That leads to heap corruption or ODR crashes. A profiler tool injected into an application is the classic victim |
+| Bigger binaries | Symbol tables and string tables for thousands of template instantiations |
+
+The fix is **hidden by default, export explicitly**. That gives the same model as Windows, so one set of annotations serves both platforms.
+
+## 67.2 CMake Settings
+
+```cmake
+# fragment -- top-level, before targets are created
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)    # -fvisibility=hidden for C++ (also C_, HIP_, CUDA_ variants)
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)    # -fvisibility-inlines-hidden
+
+# or per target:
+set_target_properties(mylib PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
+```
+
+- **`<LANG>_VISIBILITY_PRESET`** maps to `-fvisibility=` and applies to all target types, including static and object libraries that are later linked into a `.so`. That behaviour comes from policy CMP0063, which is always NEW under CMake 4.x.
+- **`VISIBILITY_INLINES_HIDDEN`** maps to `-fvisibility-inlines-hidden`: inline functions (including member functions defined in the class body) get hidden visibility. Instantiations of non-inline function templates are **not** affected and stay exported as `W` symbols; hiding them needs `-fvisibility=hidden` (`CXX_VISIBILITY_PRESET hidden`). This is normally a big reduction. It is unsafe only if code compares the addresses of inline functions across library boundaries.
+- **Static archives linked into a shared library** still export their symbols if those archives were compiled with default visibility, for example third-party `.a` files. Add `target_link_options(mylib PRIVATE "LINKER:--exclude-libs,ALL")` to hide every symbol that comes from static archives.
+
+## 67.3 GenerateExportHeader on Linux
+
+Section 39.4 shows `generate_export_header` for Windows DLLs. The same header does the right thing on Linux. Here is the generated `greet_export.h`, abridged:
+
+```cpp
+// fragment -- generated by generate_export_header(greet), abridged
+#ifdef GREET_STATIC_DEFINE
+#  define GREET_EXPORT
+#  define GREET_NO_EXPORT
+#else
+#  ifndef GREET_EXPORT
+#    ifdef greet_EXPORTS          /* defined by CMake only while building the greet .so */
+#      define GREET_EXPORT __attribute__((visibility("default")))
+#    else
+#      define GREET_EXPORT __attribute__((visibility("default")))
+#    endif
+#  endif
+#  ifndef GREET_NO_EXPORT
+#    define GREET_NO_EXPORT __attribute__((visibility("hidden")))
+#  endif
+#endif
+#ifndef GREET_DEPRECATED
+#  define GREET_DEPRECATED __attribute__ ((__deprecated__))
+#endif
+```
+
+On Windows, the two `GREET_EXPORT` branches become `dllexport` and `dllimport`. On Linux, both are `visibility("default")`.
+
+A complete library, verified with GCC 15 and CMake 4.2:
+
+```cmake
+cmake_minimum_required(VERSION 3.24...4.2)
+project(greet VERSION 1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+add_library(greet SHARED src/greet.cpp)
+include(GenerateExportHeader)
+generate_export_header(greet)                       # -> ${CMAKE_CURRENT_BINARY_DIR}/greet_export.h
+target_include_directories(greet PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
+set_target_properties(greet PROPERTIES VERSION 1.0.0 SOVERSION 1)
+
+# If the same sources may also be built as a STATIC library, key off the target's
+# real type (BUILD_SHARED_LIBS is unset by default and is ignored by an explicit SHARED):
+get_target_property(_greet_type greet TYPE)
+if(_greet_type STREQUAL "STATIC_LIBRARY")
+  target_compile_definitions(greet PUBLIC GREET_STATIC_DEFINE)
+endif()
+```
+
+```cpp
+// src/greet.hpp
+#pragma once
+#include "greet_export.h"
+
+GREET_EXPORT int greet_answer();   // public API
+int greet_internal();              // not annotated -> hidden by the preset
+```
+
+```cpp
+// src/greet.cpp
+#include "greet.hpp"
+int greet_internal() { return 41; }
+int greet_answer() { return greet_internal() + 1; }
+```
+
+```text
+$ nm -C build/libgreet.so | grep greet
+0000000000001108 T greet_answer()
+00000000000010f9 t greet_internal()        <- lowercase t = local (hidden)
+$ # a consumer calling greet_internal():
+bad.cpp:(.text+0x9): undefined reference to `greet_internal()'
+```
+
+**Pitfall.** A common variant guards the define with `if(NOT BUILD_SHARED_LIBS)`. With `add_library(greet SHARED ...)` and `BUILD_SHARED_LIBS` unset (the default), that adds `-DGREET_STATIC_DEFINE` to a shared build. `GREET_EXPORT` then expands to nothing, the preset hides `greet_answer` too (`t greet_answer()`), and consumers get `undefined reference to 'greet_answer()'`. Either test the target's `TYPE` as above, or omit `SHARED` so that `BUILD_SHARED_LIBS` really decides the library type.
+
+**Classes.** Annotate the class itself: `class GREET_EXPORT Widget { ... };`. That exports its member functions, **vtable and typeinfo**. If a polymorphic type or an exception type is hidden, each DSO that uses it gets its own private `typeinfo` object. Whether the C++ runtime then falls back to comparing type *names* depends on the platform: libstdc++ on Linux usually does, while Apple's runtime compares addresses. So `catch (const MyError&)` in one library can fail to match a throw from another, and `dynamic_cast` can return `nullptr` across the boundary. The GCC visibility guide's rule is to export every exception class and polymorphic type that crosses a library boundary.
+
+## 67.4 Linker Version Scripts
+
+A version script gives exact control over exports from the linker side, and adds **symbol versioning**, as glibc does. It is useful when you cannot annotate the headers, for example for a C API or third-party code.
+
+```text
+/* src/greet.map */
+GREET_1.0 {
+  global:
+    extern "C++" { "greet_answer()"; };
+  local:
+    *;
+};
+```
+
+```cmake
+# fragment
+target_link_options(greet PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/greet.map")
+set_property(TARGET greet APPEND PROPERTY
+    LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/greet.map)   # relink when the map changes
+```
+
+```text
+$ readelf --dyn-syms -W build/libgreet.so | grep -i greet
+     5: 0000000000000000     0 OBJECT  GLOBAL DEFAULT  ABS GREET_1.0
+     6: 0000000000001108    18 FUNC    GLOBAL DEFAULT   11 _Z12greet_answerv@@GREET_1.0
+```
+
+`@@GREET_1.0` marks the default version. A later `GREET_2.0` node can add a new `greet_answer` while keeping the old one available as `greet_answer@GREET_1.0`. Binaries linked earlier keep binding to the old implementation, so you avoid a SOVERSION bump. Without `LINK_DEPENDS`, editing only the `.map` file does not trigger a relink.
+
+## 67.5 Inspecting Exports
+
+```bash
+nm -DC --defined-only libfoo.so          # exported (dynamic) symbols, demangled
+readelf --dyn-syms -W libfoo.so          # same + versions and binding
+objdump -T libfoo.so                     # same, objdump flavour
+nm -C libfoo.so | grep ' t '             # local (hidden) text symbols
+nm -DC --defined-only libfoo.so | wc -l  # quick "did hidden visibility work?" metric
+```
+
+---
+
+# 68. Static Library Link Order and Circular Dependencies
+
+> See also: [Debugging and Profiling Tools](Debugging_and_Profiling_Tools.md), [C++ Testing](../languages/CPP_Testing.md) (gtest tests dropped from static archives), Section 9.3 (`target_link_libraries`).
+
+---
+
+## 68.1 How a Traditional Linker Processes Archives
+
+GNU `ld` (bfd) and `gold` process the command line **left to right, once**:
+
+1. They keep a set of currently **undefined** symbols.
+2. For an object file (`.o`), they always include all of it. Its definitions resolve entries in the set, and its references add new ones.
+3. For an archive (`.a`), they include **only the members that resolve symbols already in the undefined set**, repeating within that archive until it stops helping. Then they move on and **never come back**.
+4. With `--as-needed` (Ubuntu's toolchain enables it by default), a shared library listed before anything references it is dropped as unneeded.
+
+The consequence is that **a library must appear after everything that uses it**: dependents first, dependencies last. If two archives reference each other, no single order works.
+
+**lld and mold do not have this restriction.** They remember the symbols in every archive and resolve against any of them, regardless of position. A build that links with `-fuse-ld=lld` and then fails with bfd `ld` on another machine is a classic symptom of a latent ordering bug.
+
+## 68.2 What CMake Already Does
+
+When dependencies are declared with `target_link_libraries`, CMake orders the link line topologically. For **cycles among STATIC libraries**, it repeats the strongly-connected component; the `LINK_INTERFACE_MULTIPLICITY` property defaults to two passes. Verified:
+
+```cmake
+# fragment
+add_library(a STATIC src/a.cpp src/a_leaf.cpp)  # a.cpp calls b_func()
+add_library(b STATIC src/b.cpp)                 # b.cpp calls a_leaf()
+target_link_libraries(a PRIVATE b)              # declare BOTH directions
+target_link_libraries(b PRIVATE a)
+add_executable(app src/main.cpp)                # main calls a_func()
+target_link_libraries(app PRIVATE a)
+```
+
+```text
+... main.cpp.o -o app ... liba.a libb.a ... liba.a libb.a          <- CMake repeats the cycle
+```
+
+`PRIVATE` deps of a static library still propagate to the final link as `$<LINK_ONLY:...>`, because an archive cannot carry its own dependencies. Real-world ordering bugs therefore come from:
+
+- **Undeclared dependencies**: `a` uses `b`, but nobody wrote `target_link_libraries(a ... b)`.
+- **Raw flags**: `target_link_libraries(app PRIVATE -lfoo -lbar)` or `${SOMETHING_LIBRARIES}` lists in the wrong order.
+- **Shared libraries with unresolved symbols** that you do not notice until a consumer links them. Use `LINKER:--no-undefined` on shared libraries to catch this at the library's own link. Python modules are the exception (Section 66).
+
+## 68.3 Reproducing and Fixing a Cycle
+
+The same two archives with the cycle **not** declared, on GNU ld:
+
+```text
+... main.cpp.o -o app ... liba.a libb.a
+/usr/bin/ld: libb.a(b.cpp.o): in function `b_func(int)':
+b.cpp:(.text+0x28): undefined reference to `a_leaf()'
+collect2: error: ld returned 1 exit status
+```
+
+`main` needs `a_func`, so `a.cpp.o` is pulled from `liba.a`. `a.cpp.o` needs `b_func`, so `b.cpp.o` is pulled from `libb.a`. `b.cpp.o` needs `a_leaf`, but that lives in `a_leaf.cpp.o` in `liba.a`, which was already passed. Fixes, best first:
+
+| Fix | How | Trade-off |
+|---|---|---|
+| Declare the real dependencies | `target_link_libraries(a PRIVATE b)` + `(b PRIVATE a)`; CMake repeats the cycle | Correct, and still documents a design smell |
+| Break the cycle | Move the shared piece (`a_leaf`) into a third library `c` that both depend on, or merge `a` and `b` | Best long-term; requires refactoring |
+| `$<LINK_GROUP:RESCAN,a,b>` (3.24+) | `target_link_libraries(app PRIVATE "$<LINK_GROUP:RESCAN,a,b>")` -> `-Wl,--start-group liba.a libb.a -Wl,--end-group` | Linker rescans until stable. Can be slow for large archives. Linux/BSD/SunOS, plus GNU toolchains on Windows |
+| Repeat by hand | `-la -lb -la` | Fragile; avoid |
+
+Verified generated link line with `LINK_GROUP`:
+
+```text
+... -o app libgreet.so.1.0.0 -Wl,--start-group liba.a libb.a -Wl,--end-group ...
+```
+
+## 68.4 `WHOLE_ARCHIVE`: Self-Registering Code That Disappears
+
+Some static-library members are never **referenced** by name. Their only job is to run a constructor:
+
+- `TEST(...)` macros register gtest cases.
+- Kernel and operator registries, as in PyTorch-style `REGISTER_OP`.
+- Plugin and factory registrations, and profiler backends that register themselves.
+
+Nothing pulls those members, so the linker drops them silently. The registry is empty at runtime, and there is no error.
+
+```cpp
+// src/plugin_x.cpp -- in a STATIC library "plugins"
+#include <cstdio>
+namespace { struct Reg { Reg() { std::puts("plugin_x registered"); } } reg; }
+```
+
+```cmake
+# fragment
+add_library(plugins STATIC src/plugin_x.cpp)
+target_link_libraries(app PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,plugins>")   # 3.24+
+```
+
+```text
+... -Wl,--push-state,--whole-archive libplugins.a -Wl,--pop-state ...
+$ ./app
+plugin_x registered
+```
+
+Without `WHOLE_ARCHIVE`, the line never prints. The alternatives are:
+
+- **An `OBJECT` library.** `add_library(plugins OBJECT ...)` and link it. Object files are always included in full, and this needs no linker-specific feature.
+- **Linking the plugins into a shared library.** Everything in a `.so` is kept.
+- **An explicit anchor.** A function in each plugin, called from `main`, forces the member in.
+
+`WHOLE_ARCHIVE` does **not** make a static library absorb another static library's objects; CMake records it for the final link only. Use `OBJECT` libraries for that.
+
+## 68.5 Diagnosing "undefined reference"
+
+```text
+undefined reference to `ns::Foo::bar(int) const'
+```
+
+Work through this checklist:
+
+| Question | Command | Typical finding |
+|---|---|---|
+| What is the exact link line? | `cmake --build build -v` | Library missing entirely, or in the wrong order (raw `-l` flags) |
+| Is the symbol defined anywhere? | `nm -C liba.a \| grep 'Foo::bar'` (`T` = defined, `U` = needed) | Only `U` everywhere: the function was never compiled (template in a `.cpp`, missing source file, `#ifdef`'d out) |
+| Is it defined with the *same* signature? | `nm liba.a \| grep bar \| c++filt` | `bar(int)` vs `bar(long)`, or missing `const`. Mangled names differ |
+| C vs C++ linkage? | `nm` shows `bar` (C) vs `_Z...bar` (C++) | Missing `extern "C"` around a C header |
+| libstdc++ dual ABI? | `nm -C` shows `std::__cxx11::basic_string` on one side only | Mismatched `_GLIBCXX_USE_CXX11_ABI` (old prebuilt libraries, some older PyTorch builds) |
+| Exported from the `.so`? | `nm -DC --defined-only libfoo.so \| grep bar` | Defined but hidden (Section 67): missing `FOO_EXPORT` |
+| Which file references / defines it? | `-Wl,--trace-symbol=_ZNK2ns3Foo3barEi` (alias `-Wl,-y,SYM`) | Shows each definition and reference site |
+| Why was an archive member (not) pulled? | `-Wl,--trace` or `-Wl,-Map=app.map` | The map file lists every pulled member and why |
+| `undefined reference to 'vtable for Foo'` | n/a | The first non-inline virtual function (the "key function") has no definition |
+| Static data member? | n/a | Declared in the class but not defined in a `.cpp` (pre-C++17, or not `inline`) |
+
+Add linker diagnostics in CMake temporarily:
+
+```cmake
+# fragment
+target_link_options(app PRIVATE "LINKER:--trace-symbol=_ZNK2ns3Foo3barEi" "LINKER:-Map=app.map")
+```
+
+---
+
+# Part 16: Best Practices and Interview Questions
+
+---
+
+# 69. Project Layout and Conventions
+
+---
+
+## 69.1 The Recommended Layout
 
 ```
 my_project/
@@ -6170,7 +7226,7 @@ my_project/
     `-- somelib/
 ```
 
-## 64.2 Top-Level CMakeLists.txt Template
+## 69.2 Top-Level CMakeLists.txt Template
 
 ```cmake
 cmake_minimum_required(VERSION 3.21...3.30)
@@ -6229,7 +7285,7 @@ if(MY_PROJECT_BUILD_DOCS)
 endif()
 ```
 
-## 64.3 src/CMakeLists.txt Template (Library)
+## 69.3 src/CMakeLists.txt Template (Library)
 
 ```cmake
 add_library(my_project_core
@@ -6270,7 +7326,7 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 ```
 
-## 64.4 Naming Conventions
+## 69.4 Naming Conventions
 
 | Element | Convention |
 |---|---|
@@ -6283,7 +7339,7 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/
 
 The prefix ensures no collision when consumed via `add_subdirectory` or `FetchContent`.
 
-## 64.5 What Belongs in cmake/
+## 69.5 What Belongs in cmake/
 
 | File | Purpose |
 |---|---|
@@ -6298,11 +7354,11 @@ Each should be < 100 lines and do one thing.
 
 ---
 
-# 65. Cheatsheet
+# 70. Cheatsheet
 
 ---
 
-## 65.1 Commands You Will Run Daily
+## 70.1 Commands You Will Run Daily
 
 ```bash
 # Configure
@@ -6332,7 +7388,7 @@ rm -rf build && cmake -S . -B build ...                 # full reset
 cmake --fresh -S . -B build ...                         # 3.24+ equivalent
 ```
 
-## 65.2 Commands You Use When Things Go Wrong
+## 70.2 Commands You Use When Things Go Wrong
 
 ```bash
 cmake --build build -- -d explain                       # Ninja: why is X rebuilding?
@@ -6344,9 +7400,13 @@ cmake --trace --trace-expand -S . -B build              # full trace (verbose!)
 cmake --profiling-output=p.json --profiling-format=google-trace ...
 ctest --rerun-failed --output-on-failure                # re-run only failures
 ctest --repeat until-fail:10 -R flaky_test              # flaky-test hunt
+cmake --debug-find-pkg=hip -S . -B build                # find one package only (e.g. ROCm's hip)
+readelf -d build/app | grep -E 'NEEDED|RUNPATH'         # what a binary loads and where it looks (Section 65)
+LD_DEBUG=libs ./app                                     # loader's real search path
+nm -C liba.a | grep sym; nm -DC --defined-only libb.so  # defined (T) vs needed (U); exports (Sections 67-68)
 ```
 
-## 65.3 The 30 CMake Commands You Will Use Most
+## 70.3 The 30 CMake Commands You Will Use Most
 
 | Command | Notes |
 |---|---|
@@ -6381,7 +7441,7 @@ ctest --repeat until-fail:10 -R flaky_test              # flaky-test hunt
 | `FetchContent_Declare` / `FetchContent_MakeAvailable` | Source-level deps |
 | `message` | Logging |
 
-## 65.4 Generator-Expression Cheat Sheet
+## 70.4 Generator-Expression Cheat Sheet
 
 | Genex | Meaning |
 |---|---|
@@ -6399,7 +7459,7 @@ ctest --repeat until-fail:10 -R flaky_test              # flaky-test hunt
 | `$<INSTALL_INTERFACE:value>` | `value` after install |
 | `$<AND:c1,c2>`, `$<OR:c1,c2>`, `$<NOT:c>` | Boolean |
 
-## 65.5 Useful Variables
+## 70.5 Useful Variables
 
 | Variable | Meaning |
 |---|---|
@@ -6418,14 +7478,18 @@ ctest --repeat until-fail:10 -R flaky_test              # flaky-test hunt
 | `CMAKE_INSTALL_PREFIX` | Install destination |
 | `CMAKE_PREFIX_PATH` | Where `find_package` searches |
 | `CMAKE_MODULE_PATH` | Where `include()`/`find_package` find modules |
+| `CMAKE_HIP_ARCHITECTURES` | GPU targets for HIP-language code, e.g. `gfx90a;gfx942` (Section 64) |
+| `GPU_TARGETS` | GPU targets for the legacy `hip::device` flow (`AMDGPU_TARGETS` is deprecated) |
+| `CMAKE_INSTALL_RPATH` | Runtime search path written at install, e.g. `$ORIGIN/../lib` (Section 65) |
+| `CMAKE_CXX_VISIBILITY_PRESET` | `hidden` for "export only what is annotated" (Section 67) |
 
 ---
 
-# 66. Common Pitfalls
+# 71. Common Pitfalls
 
 ---
 
-## 66.1 The "I Lost an Afternoon To This" List
+## 71.1 The "I Lost an Afternoon To This" List
 
 ### Pitfall 1: file(GLOB) for sources
 
@@ -6584,11 +7648,11 @@ cmake_minimum_required(VERSION 2.8)   # resets policies!
 
 ---
 
-# 67. Interview Questions and Answers
+# 72. Interview Questions and Answers
 
 ---
 
-## 67.1 Fundamentals
+## 72.1 Fundamentals
 
 **Q1. What problem does CMake solve, and how is it different from Make?**
 
@@ -6615,7 +7679,7 @@ Legacy CMake was **directory-based**. You set `include_directories()`, `add_defi
 
 The other big shift is **imported targets** instead of variables: `find_package(OpenSSL)` exposes `OpenSSL::SSL` (with its includes, defs, and link libs encoded as the target's `INTERFACE_*` properties) instead of `OPENSSL_LIBRARIES` and `OPENSSL_INCLUDE_DIR` strings.
 
-## 67.2 Targets and Properties
+## 72.2 Targets and Properties
 
 **Q4. Explain PUBLIC, PRIVATE, and INTERFACE in target_link_libraries.**
 
@@ -6655,7 +7719,7 @@ A regular target is built from sources by this CMake project. An IMPORTED target
 
 Imported targets are how `find_package(OpenSSL)` exposes `OpenSSL::SSL`: under the hood, CMake creates an IMPORTED library, sets its `IMPORTED_LOCATION` to `/usr/lib/libssl.so`, its `INTERFACE_INCLUDE_DIRECTORIES` to `/usr/include`, and you link against it with the same `target_link_libraries` you'd use for a local target.
 
-## 67.3 Configurations, Generators, Generator Expressions
+## 72.3 Configurations, Generators, Generator Expressions
 
 **Q7. Why doesn't `if(CMAKE_BUILD_TYPE STREQUAL "Debug")` work everywhere?**
 
@@ -6688,7 +7752,7 @@ Ninja was designed explicitly to be the back-end of meta-build systems (CMake, G
 
 The only real disadvantage of Ninja is that it's not human-readable -- by design, you don't hand-edit `build.ninja`. But you weren't going to hand-edit `Makefile` either, with a CMake project.
 
-## 67.4 Dependencies
+## 72.4 Dependencies
 
 **Q10. find_package: module mode vs config mode -- explain.**
 
@@ -6729,7 +7793,7 @@ FetchContent_Declare(json
 
 Combined with `GIT_SHALLOW TRUE`, downloads are also faster. Without pinning, your team gets nondeterministic builds when upstream moves.
 
-## 67.5 Installation and Packaging
+## 72.5 Installation and Packaging
 
 **Q13. Walk through the steps to make your library consumable via `find_package`.**
 
@@ -6795,7 +7859,7 @@ The consumer's `find_package(MyLib)` includes this file (transitively via your `
 
 This is the mechanism that makes `target_link_libraries(consumer PRIVATE MyLib::my_lib)` "just work" without the consumer needing to know anything about MyLib's internal layout.
 
-## 67.6 Testing and Tooling
+## 72.6 Testing and Tooling
 
 **Q16. What does `gtest_discover_tests` do better than `add_test`?**
 
@@ -6854,7 +7918,7 @@ The key points:
 
 Standard CI rig: one job builds with ASan+UBSan, one job with TSan; each runs the entire test suite.
 
-## 67.7 Advanced
+## 72.7 Advanced
 
 **Q19. Why might `target_include_directories(... PUBLIC ...)` create a problem for installed consumers?**
 
@@ -6966,6 +8030,157 @@ Several debugging tools:
 7. Examine the file: `cat /opt/mylib/lib/cmake/MyLib/MyLibConfig.cmake` -- does it look sane? Are the `find_dependency` calls failing transitively?
 8. Try a minimal repro: a fresh project with one `find_package(MyLib REQUIRED)` and a `message(STATUS "Found at ${MyLib_DIR}")` -- isolates the problem from the rest of your project.
 
+## 72.8 GPU, Python, and Linking
+
+**Q26. How do you build HIP code with CMake today, and why not just set `CMAKE_CXX_COMPILER=hipcc`?**
+
+Use the **HIP language** (CMake 3.21+): `project(p LANGUAGES CXX HIP)`, put kernels in `.hip` files (or mark `.cpp`/`.cu` files with `set_source_files_properties(... PROPERTIES LANGUAGE HIP)`), and set `CMAKE_HIP_ARCHITECTURES`. CMake drives ROCm's clang directly with `-x hip --offload-arch=...`. Host-only files in the same target are still compiled by the host compiler, and architectures are a per-target property (`HIP_ARCHITECTURES`).
+
+`hipcc` as the CXX compiler does work, because CMake treats it as the clang underneath. But:
+
+- Every file is compiled as HIP, which is slower.
+- The wrapper injects flags CMake cannot see or reason about.
+- You lose `$<COMPILE_LANGUAGE:HIP>` and a separate `CMAKE_HIP_FLAGS`.
+- `hipcc` is explicitly rejected as `CMAKE_HIP_COMPILER`.
+
+The intermediate "legacy" flow uses `amdclang++` as the CXX compiler + `find_package(hip)` + `hip::device` + `GPU_TARGETS`. It is fine for existing projects, but `hip::device` must be linked `PRIVATE`. Otherwise its `-x hip` usage requirement leaks to consumers and their `.cpp` files get compiled as HIP too.
+
+**Q27. CI builds a HIP binary that crashes on the cluster's MI300X with "device kernel image is invalid" (or `hipErrorNoBinaryForGpu`). What happened, and how do you prevent it?**
+
+The fat binary has no code object for the device's ISA (gfx942). The usual cause is that architectures were left to auto-detection:
+
+- With the HIP language, `CMAKE_HIP_ARCHITECTURES` defaults to whatever `rocm_agent_enumerator` reports on the **build** machine.
+- With `hip::device`, `GPU_TARGETS` defaults to what `amdgpu-arch` reports.
+- A GPU-less CI runner falls back to the compiler default. A developer box yields only its own GPU.
+
+Fixes:
+
+1. Pass the list explicitly in a preset: `"CMAKE_HIP_ARCHITECTURES": "gfx90a;gfx942;gfx950"`.
+2. Set it **before** `project()`, because language enablement caches a default.
+3. For the legacy flow, set `GPU_TARGETS` (not the deprecated `AMDGPU_TARGETS`) **before** `find_package(hip)`.
+4. Verify with `cmake --build build -v`: every `--offload-arch=` should be present.
+
+Each extra architecture adds compile time and binary size, roughly linearly. Ship the set you support, not "all". Mind feature-qualified targets (`gfx90a:xnack+`) if you rely on XNACK.
+
+**Q28. How do you link a profiling tool against rocprofiler-sdk in CMake, and what can go wrong at runtime?**
+
+The CMake side:
+
+- Call `find_package(rocprofiler-sdk REQUIRED)` with `CMAKE_PREFIX_PATH` set to the ROCm root, then `target_link_libraries(tool PRIVATE rocprofiler-sdk::rocprofiler-sdk)`.
+- Build the tool as a `SHARED` library with `CXX_VISIBILITY_PRESET hidden`. The SDK finds `rocprofiler_configure` by name, and its declaration in `registration.h` is marked `visibility("default")`, so it remains the only export. Check with `nm -DC --defined-only`.
+- Add `LINKER:--no-undefined`, so that a missing dependency fails at link time instead of at `dlopen` inside someone else's application.
+- Give it `INSTALL_RPATH "$ORIGIN"`, or `$ORIGIN/..`, to find its own sibling libraries after install.
+
+Runtime problems:
+
+| Problem | Typical cause |
+|---|---|
+| The tool is never initialised | Wrong `ROCP_TOOL_LIBRARIES` path, or `rocprofiler_configure` is not exported (it was defined without including the header, so it is hidden) |
+| `cannot open shared object file` | A dependency is missing from RUNPATH (RUNPATH is not inherited from the app) |
+| Crashes | Symbol clashes with the application. You exported internal symbols, or you linked a static copy of a library the app also uses without hidden visibility or `--exclude-libs,ALL` |
+
+For markers, link `rocprofiler-sdk-roctx::rocprofiler-sdk-roctx`. roctracer historically shipped no CMake config, so wrap it in a Find module with an `IMPORTED` target if you must use it.
+
+**Q29. The program runs from the build tree but after `cmake --install` it fails with "error while loading shared libraries: libfoo.so.1: cannot open shared object file". Explain and fix.**
+
+CMake links build-tree binaries with an absolute **build RPATH** pointing at the build directories, which is why they run. At install it rewrites the RPATH to `INSTALL_RPATH`, and that is **empty by default**. The installed binary has no idea where `libfoo.so.1` lives, and `/usr/local/lib`-style prefixes are often not in `ld.so.cache` either.
+
+Diagnose:
+
+- `readelf -d bin/app | grep -E 'NEEDED|RUNPATH'` shows no RUNPATH.
+- `ldd bin/app` shows `libfoo.so.1 => not found`.
+- `LD_DEBUG=libs bin/app` shows the actual search.
+
+Fix: before creating targets, set `set(CMAKE_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")`, which is relocatable. Shared libraries that depend on siblings get `INSTALL_RPATH "$ORIGIN"`. Alternatives:
+
+- `CMAKE_INSTALL_RPATH_USE_LINK_PATH ON`, for external deps such as `/opt/rocm/lib`. It produces absolute paths and is not relocatable.
+- An `/etc/ld.so.conf.d/` entry plus `ldconfig`, for system-wide installs.
+- `LD_LIBRARY_PATH` in a wrapper script, as a last resort.
+
+**Q30. RPATH vs RUNPATH: what is the difference and why does it matter?**
+
+Both are ELF dynamic tags listing search directories. There are two differences:
+
+1. **Precedence.** `DT_RPATH` is searched **before** `LD_LIBRARY_PATH`, so users cannot override it. `DT_RUNPATH` is searched **after** it.
+2. **Scope.** `DT_RPATH` of the executable also applies to libraries loaded on behalf of its dependencies. `DT_RUNPATH` applies only to the object's **own direct** `DT_NEEDED`.
+
+Modern linkers on most distros emit RUNPATH by default (`--enable-new-dtags`). Projects that used to work because the executable's RPATH covered transitive deps break after a toolchain upgrade: `app -> liba.so -> libb.so` fails with `libb.so: not found` even though `ldd` finds `liba.so`. The right fix is to give each shared library its own `$ORIGIN` runpath, not to force `--disable-new-dtags`. `$ORIGIN` expands to the directory of the object containing the tag, which makes an install tree relocatable.
+
+**Q31. How would you ship a C++ library to Python users as `pip install`-able wheels?**
+
+1. Write the bindings with **pybind11** (most features) or **nanobind** (smaller, faster, supports the stable ABI). In CMake, use `find_package(Python COMPONENTS Interpreter Development.Module)` and `pybind11_add_module`/`nanobind_add_module`. Use `Development.Module`, not `Development`, because extension modules must **not** link libpython on Linux: the symbols come from the running interpreter.
+2. Use **scikit-build-core** as the PEP 517 backend. `pyproject.toml` declares `build-system.requires = ["scikit-build-core", "pybind11"]`, and `CMakeLists.txt` does `install(TARGETS _core LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})`. `pip install .` and `python -m build` then work.
+3. Build inside a **manylinux** container (`manylinux_2_28`) for each CPython version, usually with **cibuildwheel**. Building on a new distro bakes in new glibc symbol versions: a wheel built on a current Ubuntu came out as `manylinux_2_39`, which rules out RHEL 8/9.
+4. Run **`auditwheel repair`**. It vendors non-system `.so` dependencies into `<pkg>.libs/` with hashed names, sets `$ORIGIN` RUNPATHs, and retags the wheel. Exclude driver-coupled GPU libraries (`--exclude libamdhip64.so.7`, `libcuda.so.1`) or deliberately vendor the whole runtime.
+5. Optionally target the stable ABI (nanobind `STABLE_ABI` + `wheel.py-api = "cp312"`), so that one wheel per platform covers CPython 3.12 and later.
+
+Follow-ups:
+
+- **Releasing the GIL.** Use `py::call_guard<py::gil_scoped_release>()` for long C++ calls that do not touch Python objects.
+- **Hidden visibility.** It is the default in both binding libraries. It stops two extensions with different copies of a library from clashing.
+
+**Q32. Why build shared libraries with `-fvisibility=hidden`, and how do you do it in CMake?**
+
+ELF exports every non-static symbol by default. That causes four problems:
+
+- **Accidental ABI surface.** Every helper becomes something you must keep stable.
+- **Slower loads.** The dynamic symbol table is bigger and there are more relocations.
+- **Fewer optimisations.** Exported functions are interposable, so intra-library calls go through the PLT and inlining is limited.
+- **Symbol clashes** when two libraries in one process carry different copies of, say, LLVM or protobuf. This is a real risk for profiler tools injected into applications.
+
+In CMake:
+
+- Set `CMAKE_CXX_VISIBILITY_PRESET hidden` and `CMAKE_VISIBILITY_INLINES_HIDDEN ON`. Under CMP0063 these apply to static and object libraries too.
+- Generate `FOO_EXPORT` macros with `generate_export_header(foo)`. On Linux they expand to `__attribute__((visibility("default")))`, and on Windows to `dllexport`/`dllimport`, so one annotation scheme serves both platforms.
+- Annotate public functions and **classes**. Exception classes and polymorphic types used across the boundary must be exported, or `catch` and `dynamic_cast` can fail.
+- Optionally add a version script (`LINKER:--version-script=foo.map` + `LINK_DEPENDS`) for exact control and symbol versioning.
+- Add `LINKER:--exclude-libs,ALL` to hide symbols that come from third-party static archives.
+
+**Q33. You get `undefined reference to 'foo(int)'` even though you "linked the library". How do you debug it?**
+
+1. **Look at the real link line** with `cmake --build build -v`. Is the library there, and is it **after** the objects that need it? GNU ld scans archives once, left to right. lld and mold do not, so a latent ordering bug can appear only on some machines.
+2. **Check whether the symbol is defined.** In `nm -C libfoo.a | grep foo`, `T` means defined and `U` means needed. If nothing defines it, it was never compiled: a template defined in a `.cpp`, a missing source, or an `#ifdef`.
+3. **Compare signatures.** Run `nm` + `c++filt` on both sides. Look for `int` vs `long`, missing `const`, a missing `extern "C"` (C symbols are unmangled), or a `std::__cxx11::` mismatch from `_GLIBCXX_USE_CXX11_ABI`.
+4. **For a shared library, check that it is exported.** `nm -DC --defined-only libfoo.so` will not list it if it is hidden.
+5. **Use linker tracing.** `-Wl,--trace-symbol=<mangled>` shows every definition and reference, and `-Wl,-Map=app.map` shows which archive members were pulled and why.
+6. **Recognise the special messages.** `undefined reference to 'vtable for Foo'` means the first non-inline virtual function has no definition.
+
+In CMake, the cure is almost always to declare the dependency with `target_link_libraries(consumer PRIVATE foo)` on the target that actually uses it, and to stop passing raw `-l` flags.
+
+**Q34. Tests or plugins defined in a static library silently disappear from the final executable. Why, and what are the CMake fixes?**
+
+The linker pulls an archive member only if it resolves a currently-undefined symbol. A file whose only content is a static registrar object (`TEST(...)`, `REGISTER_KERNEL(...)`, plugin factories) is never referenced by name, so it is never pulled. Its constructor never runs, and nothing reports an error.
+
+Fixes:
+
+- **`$<LINK_LIBRARY:WHOLE_ARCHIVE,plugins>`** (CMake 3.24+). It generates `-Wl,--push-state,--whole-archive libplugins.a -Wl,--pop-state` on GNU, and the equivalents on Apple and MSVC.
+- **An `OBJECT` library.** Object files are always linked in full.
+- **A shared library.** Everything in a `.so` is kept.
+- **An explicit anchor symbol** referenced from `main`.
+
+`WHOLE_ARCHIVE` on a static-to-static link has no effect, because CMake applies it at the final link. Use `OBJECT` libraries to merge archives.
+
+**Q35. Two static libraries depend on each other. What does CMake do, and what are your options?**
+
+If the cycle is declared (`target_link_libraries(a PRIVATE b)` and `(b PRIVATE a)`), CMake detects the strongly-connected component and repeats it on the link line (`liba.a libb.a ... liba.a libb.a`). `LINK_INTERFACE_MULTIPLICITY` controls the number of passes, which defaults to 2. If the cycle is not declared, GNU ld fails with `undefined reference`.
+
+Options, best first:
+
+1. Break the cycle by extracting the shared code into a third library, or merge the two libraries.
+2. Declare both edges and let CMake repeat them.
+3. `$<LINK_GROUP:RESCAN,a,b>` (3.24+), which uses `--start-group/--end-group`. The linker rescans until no new symbols resolve. It is correct, but slower for big archives, and it is available only on GNU-like linkers (Linux/BSD/SunOS and GNU toolchains on Windows).
+
+A cycle is a design smell. The libraries are not independently reusable, so mention that you would fix the layering.
+
+**Q36. What changes when you port a CUDA CMake project to HIP?**
+
+- **Language.** `enable_language(CUDA)` becomes `enable_language(HIP)` (3.21+). `CMAKE_CUDA_ARCHITECTURES=80;90` (SM numbers) becomes `CMAKE_HIP_ARCHITECTURES=gfx90a;gfx942`, and `CMAKE_CUDA_STANDARD` becomes `CMAKE_HIP_STANDARD`.
+- **Sources.** Rename `.cu` to `.hip`, or keep the names and set `LANGUAGE HIP`. Run hipify on the source.
+- **Libraries.** `find_package(CUDAToolkit)` + `CUDA::cudart/cublas/cufft` becomes `find_package(hip)` (`hip::host` for C++ TUs) + `roc::rocblas`/`roc::hipblas`/`hip::hipfft`.
+- **Relocatable device code.** `CUDA_SEPARABLE_COMPILATION ON` has no HIP property: use `-fgpu-rdc` compile and link options.
+- **Single source for both vendors.** CMake 3.28+ can compile the HIP language for NVIDIA with `CMAKE_HIP_PLATFORM=nvidia`, using nvcc.
+- **What does not port.** Inline PTX, warp-size assumptions (64 on CDNA vs 32), and `__shfl` masks need source changes, not build changes.
+
 ---
 
 > End of *CMake Fundamentals* -- comprehensive reference.
@@ -6974,5 +8189,7 @@ Several debugging tools:
 >
 > - [C++ Fundamentals](../languages/Cpp_Fundamentals.md) -- the language this build system is most often used with.
 > - [C++ Testing](../languages/CPP_Testing.md) -- GoogleTest, GoogleMock, and the CMake recipes for integrating them. Section 27 of that guide overlaps with this guide's Part 10.
-> - [Parallel and GPU Programming](../ml-gpu/Parallel_GPU_Programming.md) -- the CUDA, HIP, OpenMP, and other backends commonly orchestrated through CMake.
+> - [Parallel and GPU Programming](../ml-gpu/Parallel_GPU_Programming.md) -- the CUDA, HIP, OpenMP, and other backends commonly orchestrated through CMake. Section 64 of this guide covers building them.
+> - [AMD GPU Architecture and Profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md) -- what the rocprofiler-sdk tools built in Section 64.5 measure.
+> - [Debugging and Profiling Tools](Debugging_and_Profiling_Tools.md) -- `readelf`, `nm`, `ldd`, `gdb`, and `perf`, as used in Sections 65-68.
 
