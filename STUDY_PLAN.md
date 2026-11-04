@@ -114,7 +114,7 @@ If you only have **90 minutes** on a weekday: coding (1 new problem + re-solves,
 |---|---|---|---|
 | A | 14 | 90-100 | [Core 75](practice/Coding_Problem_List.md#3-core-75-subset) + [NVIDIA/AMD/HPC list](practice/Coding_Problem_List.md#55-nvidia--amd--hpc-systems-flavored) + [Concurrency bonus](practice/Coding_Problem_List.md#41-concurrency-systems-c-and-gpuhpc-loops) |
 | B | 14 | 90-100 | Core 75 + Concurrency bonus + [Concurrency Coding Problems](computer-science/Concurrency_Coding_Problems.md) |
-| C | 19 | about 150 | the full [150-problem checklist](practice/Coding_Problem_List.md#2-the-150-problem-checklist-by-pattern) + one [company list](practice/Coding_Problem_List.md#5-company-flavored-lists-commonly-reported) |
+| C | 19 | about 150 | the original 150 of the [300-problem checklist](practice/Coding_Problem_List.md#2-the-300-problem-checklist-by-pattern) (skip lines marked `ext`; the picker's `--no-ext` does this) + one [company list](practice/Coding_Problem_List.md#5-company-flavored-lists-commonly-reported). The 150 `ext` problems are a stretch goal after the loop plan, or a source of extra problems for weak patterns. |
 
 These numbers follow the pattern order of the [Six-Week Coding Schedule](practice/Coding_Problem_List.md#8-six-week-coding-schedule), stretched to eight weeks so that week 7 holds company lists and week 8 holds only re-solves and mocks.
 
@@ -1246,7 +1246,7 @@ Tick a box only when the section meets the "done" bar in [Section 1](#1-how-to-u
 **[Coding Problem List](practice/Coding_Problem_List.md)**
 
 - [ ] [1. How to Use This List](practice/Coding_Problem_List.md#1-how-to-use-this-list)
-- [ ] [2. The 150-Problem Checklist by Pattern](practice/Coding_Problem_List.md#2-the-150-problem-checklist-by-pattern)
+- [ ] [2. The 300-Problem Checklist by Pattern](practice/Coding_Problem_List.md#2-the-300-problem-checklist-by-pattern)
 - [ ] [3. Core 75 Subset](practice/Coding_Problem_List.md#3-core-75-subset)
 - [ ] [4. Bonus Lists: Concurrency, Strings, Shortest Paths](practice/Coding_Problem_List.md#4-bonus-lists-concurrency-strings-shortest-paths)
 - [ ] [5. Company-Flavored Lists (Commonly Reported)](practice/Coding_Problem_List.md#5-company-flavored-lists-commonly-reported)
@@ -1255,6 +1255,32 @@ Tick a box only when the section meets the "done" bar in [Section 1](#1-how-to-u
 - [ ] [8. Six-Week Coding Schedule](practice/Coding_Problem_List.md#8-six-week-coding-schedule)
 - [ ] [9. Self-Practice Mock Interview Format](practice/Coding_Problem_List.md#9-self-practice-mock-interview-format)
 - [ ] [10. Unsolved Practice Sets by Pattern](practice/Coding_Problem_List.md#10-unsolved-practice-sets-by-pattern)
+
+**[LeetCode Solutions](practice/LeetCode_Solutions.md)** (an answer key: tick a section once you have re-solved its problems from the checklist, not when you have read it)
+
+- [ ] [1. Two Pointers](practice/LeetCode_Solutions.md#1-two-pointers)
+- [ ] [2. Sliding Window](practice/LeetCode_Solutions.md#2-sliding-window)
+- [ ] [3. Fast and Slow Pointers](practice/LeetCode_Solutions.md#3-fast-and-slow-pointers)
+- [ ] [4. Merge Intervals](practice/LeetCode_Solutions.md#4-merge-intervals)
+- [ ] [6. In-place Linked List Reversal](practice/LeetCode_Solutions.md#6-in-place-linked-list-reversal)
+- [ ] [7. BFS (Breadth-First Search)](practice/LeetCode_Solutions.md#7-bfs-breadth-first-search)
+- [ ] [8. DFS (Depth-First Search)](practice/LeetCode_Solutions.md#8-dfs-depth-first-search)
+- [ ] [10. Subsets / Backtracking](practice/LeetCode_Solutions.md#10-subsets--backtracking)
+- [ ] [11. Modified Binary Search](practice/LeetCode_Solutions.md#11-modified-binary-search)
+- [ ] [12. Top K Elements](practice/LeetCode_Solutions.md#12-top-k-elements)
+- [ ] [13. K-way Merge](practice/LeetCode_Solutions.md#13-k-way-merge)
+- [ ] [14. Topological Sort](practice/LeetCode_Solutions.md#14-topological-sort)
+- [ ] [15. Monotonic Stack / Queue](practice/LeetCode_Solutions.md#15-monotonic-stack--queue)
+- [ ] [16. Union Find (Disjoint Set)](practice/LeetCode_Solutions.md#16-union-find-disjoint-set)
+- [ ] [17. Trie (Prefix Tree)](practice/LeetCode_Solutions.md#17-trie-prefix-tree)
+- [ ] [18. Dynamic Programming](practice/LeetCode_Solutions.md#18-dynamic-programming)
+- [ ] [19. Greedy](practice/LeetCode_Solutions.md#19-greedy)
+- [ ] [20. Bit Manipulation](practice/LeetCode_Solutions.md#20-bit-manipulation)
+- [ ] [21. Prefix Sum & Difference Array](practice/LeetCode_Solutions.md#21-prefix-sum--difference-array)
+- [ ] [22. Hashing & Array Classics](practice/LeetCode_Solutions.md#22-hashing--array-classics)
+- [ ] [23. Matrix Manipulation](practice/LeetCode_Solutions.md#23-matrix-manipulation)
+- [ ] [24. Stack-based Parsing](practice/LeetCode_Solutions.md#24-stack-based-parsing)
+- [ ] [26. Design Problems](practice/LeetCode_Solutions.md#26-design-problems)
 
 **[C++ Output Quiz](practice/Cpp_Output_Quiz.md)**
 

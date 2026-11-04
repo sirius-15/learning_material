@@ -1,15 +1,15 @@
-# Coding Problem List -- Comprehensive 150-Problem Checklist, Practice Protocol, and 6-Week Plan
+# Coding Problem List -- Comprehensive 300-Problem Checklist, Practice Protocol, and 6-Week Plan
 
 > Last reviewed: 2026-11 · Versions assumed: LeetCode problem numbers and official difficulty labels as of 2026-11. Company-flavored lists reflect commonly reported candidate experiences and are not authoritative.
 
-> A pattern-organized checklist of 150 problems (Blind-75 / NeetCode-150 style coverage), a flagged **core 75** subset, company-flavored lists, a timed practice protocol with spaced repetition and an error log, a 6-week schedule, a self-run mock-interview format with a rubric, and 30 unsolved practice problems with answers at the end. Pattern names and numbering match [LeetCode Patterns](../computer-science/LeetCode_Patterns.md). That guide has the templates and worked solutions; this file tells you what to solve, in what order, and how to practice.
+> A pattern-organized checklist of 300 problems: the original 150 (Blind-75 / NeetCode-150 style coverage) plus 150 extended (`ext`) problems. It also has a flagged **core 75** subset, company-flavored lists, a timed practice protocol with spaced repetition and an error log, a 6-week schedule, a self-run mock-interview format with a rubric, and 30 unsolved practice problems with answers at the end. Pattern names and numbering match [LeetCode Patterns](../computer-science/LeetCode_Patterns.md). That guide has the templates and worked solutions, and [LeetCode Solutions](LeetCode_Solutions.md) has Python and C++ solutions for every checklist problem the guide does not work. Every checklist line links straight to its solution. This file tells you what to solve, in what order, and how to practice.
 
 ---
 
 ## Table of Contents
 
 1. [How to Use This List](#1-how-to-use-this-list)
-2. [The 150-Problem Checklist by Pattern](#2-the-150-problem-checklist-by-pattern)
+2. [The 300-Problem Checklist by Pattern](#2-the-300-problem-checklist-by-pattern)
 3. [Core 75 Subset](#3-core-75-subset)
 4. [Bonus Lists: Concurrency, Strings, Shortest Paths](#4-bonus-lists-concurrency-strings-shortest-paths)
 5. [Company-Flavored Lists (Commonly Reported)](#5-company-flavored-lists-commonly-reported)
@@ -29,7 +29,7 @@
 Each checklist line has this shape:
 
 ```text
-- [ ] **LC <number>** · <title> · <Easy|Medium|Hard> [· ★ core] [· worked in guide] [· premium] · [§N](link to pattern section)
+- [ ] **LC <number>** · <title> · <Easy|Medium|Hard> [· ★ core] [· ext] [· premium] · [§N](link to pattern section) · [solution](link to solution)
 ```
 
 | Marker | Meaning |
@@ -38,15 +38,18 @@ Each checklist line has this shape:
 | **LC number** | LeetCode problem number. Search the number on leetcode.com. Numbers are stable even when titles change slightly. |
 | Difficulty | LeetCode's official label as of 2026-11. A few labels in the patterns guide differ: LeetCode rates 167 Two Sum II and 72 Edit Distance as Medium, 202 Happy Number, 21 Merge Two Sorted Lists and 703 Kth Largest in a Stream as Easy, 102 Level Order Traversal as Medium, 127 Word Ladder as Hard, 287 Find the Duplicate Number as Medium (the guide's §3 says Hard), and 295 Find Median from Data Stream as Hard (the guide's §9 says Medium). This list uses LeetCode's labels because those set the interviewer's time expectations. |
 | ★ core | One of the [core 75](#3-core-75-subset). Do these first if you have less than three weeks. |
-| worked in guide | A full solution with Python and C++ is in [LeetCode Patterns](../computer-science/LeetCode_Patterns.md). Attempt it first and read the guide only after your attempt (Section 6). |
+| ext | One of the 150 extended problems added on top of the original 150. Do the original 150 first. The ext problems add variants and depth to each pattern (see [Section 8](#8-six-week-coding-schedule)). The picker's `--no-ext` flag leaves them out. |
 | premium | LeetCode Premium. Free mirrors of most classic premium problems exist on LintCode and NeetCode's site. |
 | §N link | Jumps to the template and pitfalls for that pattern. |
+| solution | Jumps to the full Python and C++ solution. It is in [LeetCode Patterns](../computer-science/LeetCode_Patterns.md) or in [LeetCode Solutions](LeetCode_Solutions.md). Attempt the problem first and read the solution only after your attempt (Section 6). |
 
 ### 1.2 Distribution
 
 | | Easy | Medium | Hard | Total |
 |---|---|---|---|---|
-| Full list | 24 | 106 | 20 | 150 |
+| Original 150 | 24 | 106 | 20 | 150 |
+| Extended (`ext`) | 27 | 94 | 29 | 150 |
+| Full list | 51 | 200 | 49 | 300 |
 | Interview reality (reported) | rare in onsites; common in phone screens and as warm-ups | the bulk of onsite questions | occasional, most often at Google; less common at team-driven companies | |
 
 The list is weighted toward mediums because that is what onsite rounds mostly ask. Hards are included where they teach a technique that also shows up inside mediums: monotonic stacks (84), two heaps (295), binary search on the answer (410), interval sweeps (218).
@@ -81,7 +84,7 @@ Assume roughly 10^8 simple operations per second for C++ and 10^7 for Python, an
 
 **Q1. Is solving 150 problems enough, or should you aim for 300+?**
 
-For pattern-based interviews, 150 problems that you can each re-solve cold beats 400 problems you solved once with hints. Interviews reward recognition and clean execution, and both come from spaced re-solving, not from first exposure. A reasonable bar: all 150 solved, the core 75 re-solved twice, and an A or B grade (Section 6.3) on at least 80% of random mediums in mock conditions. Go past 150 only when the error log shows a specific weak pattern. Then add 5-10 problems for that pattern instead of more breadth.
+For pattern-based interviews, 150 problems that you can each re-solve cold beats 400 problems you solved once with hints. Interviews reward recognition and clean execution, and both come from spaced re-solving, not from first exposure. A reasonable bar: all 150 solved, the core 75 re-solved twice, and an A or B grade (Section 6.3) on at least 80% of random mediums in mock conditions. Go past 150 only when the error log shows a specific weak pattern. Then add 5-10 problems for that pattern instead of more breadth. The `ext` problems in that pattern's checklist group are there for this. Working through all 300 makes sense only if you have more than about ten weeks or are targeting Google-style medium-hard rounds.
 
 **Q2. The interviewer asks a problem you have already solved. Do you say so?**
 
@@ -89,291 +92,441 @@ Yes, briefly: "I've seen something similar. Happy to solve it, or we can switch.
 
 ---
 
-## 2. The 150-Problem Checklist by Pattern
+## 2. The 300-Problem Checklist by Pattern
 
-Patterns are numbered 2.1-2.26 to match sections 1-26 of [LeetCode Patterns](../computer-science/LeetCode_Patterns.md). The guide's later sections, such as [§27 Weighted Shortest Path Patterns](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns), have no group of their own here: their checklist problems sit under the closest basic pattern (LC 743 under BFS) and link to the later section. Each pattern group runs from easier to harder.
+Patterns are numbered 2.1-2.26 to match sections 1-26 of [LeetCode Patterns](../computer-science/LeetCode_Patterns.md). The guide's later sections, such as [§27 Weighted Shortest Path Patterns](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns), have no group of their own here: their checklist problems sit under the closest basic pattern and link to the later section. For example, the §27 shortest-path problems (743, 787, 1631) are under BFS, the §28 binary-search-on-the-answer problems (1011, 1552) are under Modified Binary Search, and the §30 string-matching problems (28, 187, 214, 459, 1044) are under Hashing & Array Classics. Each pattern group runs from Easy to Hard, with the original problems before the `ext` problems at each difficulty.
 
 ### 2.1 Two Pointers
 
-Pattern guide: [LeetCode Patterns §1 Two Pointers](../computer-science/LeetCode_Patterns.md#1-two-pointers) · 6 problems (2E / 3M / 1H) · 4 core
+Pattern guide: [LeetCode Patterns §1 Two Pointers](../computer-science/LeetCode_Patterns.md#1-two-pointers) · 12 problems (5E / 6M / 1H) · 4 core · 6 ext
 
-- [ ] **LC 125** · Valid Palindrome · Easy · ★ core · worked in guide · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers)
-- [ ] **LC 167** · Two Sum II - Input Array Is Sorted · Medium · worked in guide · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers)
-- [ ] **LC 15** · 3Sum · Medium · ★ core · worked in guide · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers)
-- [ ] **LC 11** · Container With Most Water · Medium · ★ core · worked in guide · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers)
-- [ ] **LC 42** · Trapping Rain Water · Hard · ★ core · worked in guide · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers)
-- [ ] **LC 283** · Move Zeroes · Easy · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers)
+- [ ] **LC 125** · Valid Palindrome · Easy · ★ core · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-2--easy----valid-palindrome-leetcode-125)
+- [ ] **LC 283** · Move Zeroes · Easy · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](LeetCode_Solutions.md#lc-283--move-zeroes--easy)
+- [ ] **LC 26** · Remove Duplicates from Sorted Array · Easy · ext · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](LeetCode_Solutions.md#lc-26--remove-duplicates-from-sorted-array--easy)
+- [ ] **LC 977** · Squares of a Sorted Array · Easy · ext · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](LeetCode_Solutions.md#lc-977--squares-of-a-sorted-array--easy)
+- [ ] **LC 680** · Valid Palindrome II · Easy · ext · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](LeetCode_Solutions.md#lc-680--valid-palindrome-ii--easy)
+- [ ] **LC 167** · Two Sum II - Input Array Is Sorted · Medium · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-1--easy----two-sum-ii-leetcode-167)
+- [ ] **LC 15** · 3Sum · Medium · ★ core · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-3--medium----3sum-leetcode-15)
+- [ ] **LC 11** · Container With Most Water · Medium · ★ core · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-4--medium----container-with-most-water-leetcode-11)
+- [ ] **LC 75** · Sort Colors · Medium · ext · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-8-sort-colors-lc-75--medium-dutch-national-flag)
+- [ ] **LC 16** · 3Sum Closest · Medium · ext · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](LeetCode_Solutions.md#lc-16--3sum-closest--medium)
+- [ ] **LC 18** · 4Sum · Medium · ext · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](LeetCode_Solutions.md#lc-18--4sum--medium)
+- [ ] **LC 42** · Trapping Rain Water · Hard · ★ core · [§1](../computer-science/LeetCode_Patterns.md#1-two-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-5--hard----trapping-rain-water-leetcode-42)
 
 ### 2.2 Sliding Window
 
-Pattern guide: [LeetCode Patterns §2 Sliding Window](../computer-science/LeetCode_Patterns.md#2-sliding-window) · 6 problems (1E / 4M / 1H) · 4 core
+Pattern guide: [LeetCode Patterns §2 Sliding Window](../computer-science/LeetCode_Patterns.md#2-sliding-window) · 13 problems (3E / 6M / 4H) · 4 core · 7 ext
 
-- [ ] **LC 121** · Best Time to Buy and Sell Stock · Easy · ★ core · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window)
-- [ ] **LC 3** · Longest Substring Without Repeating Characters · Medium · ★ core · worked in guide · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window)
-- [ ] **LC 424** · Longest Repeating Character Replacement · Medium · ★ core · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window)
-- [ ] **LC 567** · Permutation in String · Medium · worked in guide · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window)
-- [ ] **LC 76** · Minimum Window Substring · Hard · ★ core · worked in guide · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window)
-- [ ] **LC 438** · Find All Anagrams in a String · Medium · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window)
+- [ ] **LC 121** · Best Time to Buy and Sell Stock · Easy · ★ core · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-best-time-to-buy-and-sell-stock-iiv-cooldown-fee-lc-121-122-123-188-309-714-state-machine)
+- [ ] **LC 643** · Maximum Average Subarray I · Easy · ext · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-maximum-average-subarray-i-leetcode-643--easy)
+- [ ] **LC 219** · Contains Duplicate II · Easy · ext · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](LeetCode_Solutions.md#lc-219--contains-duplicate-ii--easy)
+- [ ] **LC 3** · Longest Substring Without Repeating Characters · Medium · ★ core · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-longest-substring-without-repeating-characters-leetcode-3--medium)
+- [ ] **LC 424** · Longest Repeating Character Replacement · Medium · ★ core · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-longest-repeating-character-replacement-leetcode-424--medium)
+- [ ] **LC 567** · Permutation in String · Medium · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-permutation-in-string-leetcode-567--medium)
+- [ ] **LC 438** · Find All Anagrams in a String · Medium · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](LeetCode_Solutions.md#lc-438--find-all-anagrams-in-a-string--medium)
+- [ ] **LC 209** · Minimum Size Subarray Sum · Medium · ext · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-minimum-size-subarray-sum-leetcode-209--medium)
+- [ ] **LC 1004** · Max Consecutive Ones III · Medium · ext · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](LeetCode_Solutions.md#lc-1004--max-consecutive-ones-iii--medium)
+- [ ] **LC 76** · Minimum Window Substring · Hard · ★ core · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-minimum-window-substring-leetcode-76--hard)
+- [ ] **LC 220** · Contains Duplicate III · Hard · ext · [§29](../computer-science/LeetCode_Patterns.md#29-ordered-containers) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-contains-duplicate-iii-lc-220--hard)
+- [ ] **LC 862** · Shortest Subarray with Sum at Least K · Hard · ext · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-9-shortest-subarray-with-sum-at-least-k-leetcode-862--hard)
+- [ ] **LC 992** · Subarrays with K Different Integers · Hard · ext · [§2](../computer-science/LeetCode_Patterns.md#2-sliding-window) · [solution](../computer-science/LeetCode_Patterns.md#problem-8-subarrays-with-k-different-integers-leetcode-992--hard)
 
 ### 2.3 Fast and Slow Pointers
 
-Pattern guide: [LeetCode Patterns §3 Fast and Slow Pointers](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · 4 problems (1E / 3M / 0H) · 2 core
+Pattern guide: [LeetCode Patterns §3 Fast and Slow Pointers](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · 7 problems (4E / 3M / 0H) · 2 core · 3 ext
 
-- [ ] **LC 141** · Linked List Cycle · Easy · ★ core · worked in guide · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers)
-- [ ] **LC 142** · Linked List Cycle II · Medium · worked in guide · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers)
-- [ ] **LC 287** · Find the Duplicate Number · Medium · worked in guide · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers)
-- [ ] **LC 19** · Remove Nth Node From End of List · Medium · ★ core · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers)
+- [ ] **LC 141** · Linked List Cycle · Easy · ★ core · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-linked-list-cycle-leetcode-141--easy)
+- [ ] **LC 202** · Happy Number · Easy · ext · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-happy-number-leetcode-202--medium)
+- [ ] **LC 876** · Middle of the Linked List · Easy · ext · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-middle-of-the-linked-list-leetcode-876--easy)
+- [ ] **LC 160** · Intersection of Two Linked Lists · Easy · ext · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](LeetCode_Solutions.md#lc-160--intersection-of-two-linked-lists--easy)
+- [ ] **LC 142** · Linked List Cycle II · Medium · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-linked-list-cycle-ii-leetcode-142--medium)
+- [ ] **LC 287** · Find the Duplicate Number · Medium · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-find-the-duplicate-number-leetcode-287--hard)
+- [ ] **LC 19** · Remove Nth Node From End of List · Medium · ★ core · [§3](../computer-science/LeetCode_Patterns.md#3-fast-and-slow-pointers) · [solution](LeetCode_Solutions.md#lc-19--remove-nth-node-from-end-of-list--medium)
 
 ### 2.4 Merge Intervals
 
-Pattern guide: [LeetCode Patterns §4 Merge Intervals](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · 4 problems (1E / 3M / 0H) · 3 core
+Pattern guide: [LeetCode Patterns §4 Merge Intervals](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · 6 problems (1E / 3M / 2H) · 3 core · 2 ext
 
-- [ ] **LC 56** · Merge Intervals · Medium · ★ core · worked in guide · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals)
-- [ ] **LC 57** · Insert Interval · Medium · ★ core · worked in guide · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals)
-- [ ] **LC 435** · Non-overlapping Intervals · Medium · ★ core · worked in guide · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals)
-- [ ] **LC 252** · Meeting Rooms · Easy · worked in guide · premium · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals)
+- [ ] **LC 252** · Meeting Rooms · Easy · premium · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · [solution](../computer-science/LeetCode_Patterns.md#41-easy--meeting-rooms-leetcode-252)
+- [ ] **LC 56** · Merge Intervals · Medium · ★ core · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · [solution](../computer-science/LeetCode_Patterns.md#42-medium--merge-intervals-leetcode-56)
+- [ ] **LC 57** · Insert Interval · Medium · ★ core · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · [solution](../computer-science/LeetCode_Patterns.md#43-medium--insert-interval-leetcode-57)
+- [ ] **LC 435** · Non-overlapping Intervals · Medium · ★ core · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · [solution](../computer-science/LeetCode_Patterns.md#44-medium--non-overlapping-intervals-leetcode-435)
+- [ ] **LC 759** · Employee Free Time · Hard · ext · premium · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · [solution](../computer-science/LeetCode_Patterns.md#45-hard--employee-free-time-leetcode-759)
+- [ ] **LC 1851** · Minimum Interval to Include Each Query · Hard · ext · [§4](../computer-science/LeetCode_Patterns.md#4-merge-intervals) · [solution](LeetCode_Solutions.md#lc-1851--minimum-interval-to-include-each-query--hard)
 
 ### 2.5 Cyclic Sort
 
-Pattern guide: [LeetCode Patterns §5 Cyclic Sort](../computer-science/LeetCode_Patterns.md#5-cyclic-sort) · 3 problems (1E / 1M / 1H) · 1 core
+Pattern guide: [LeetCode Patterns §5 Cyclic Sort](../computer-science/LeetCode_Patterns.md#5-cyclic-sort) · 4 problems (2E / 1M / 1H) · 1 core · 1 ext
 
-- [ ] **LC 268** · Missing Number · Easy · ★ core · worked in guide · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort)
-- [ ] **LC 442** · Find All Duplicates in an Array · Medium · worked in guide · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort)
-- [ ] **LC 41** · First Missing Positive · Hard · worked in guide · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort)
+- [ ] **LC 268** · Missing Number · Easy · ★ core · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort) · [solution](../computer-science/LeetCode_Patterns.md#51-easy--missing-number-leetcode-268)
+- [ ] **LC 448** · Find All Numbers Disappeared in an Array · Easy · ext · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort) · [solution](../computer-science/LeetCode_Patterns.md#52-easy--find-all-numbers-disappeared-in-an-array-leetcode-448)
+- [ ] **LC 442** · Find All Duplicates in an Array · Medium · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort) · [solution](../computer-science/LeetCode_Patterns.md#54-medium--find-all-duplicates-in-an-array-leetcode-442)
+- [ ] **LC 41** · First Missing Positive · Hard · [§5](../computer-science/LeetCode_Patterns.md#5-cyclic-sort) · [solution](../computer-science/LeetCode_Patterns.md#55-hard--first-missing-positive-leetcode-41)
 
 ### 2.6 In-place Linked List Reversal
 
-Pattern guide: [LeetCode Patterns §6 In-place Linked List Reversal](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · 5 problems (1E / 3M / 1H) · 2 core
+Pattern guide: [LeetCode Patterns §6 In-place Linked List Reversal](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · 11 problems (2E / 8M / 1H) · 2 core · 6 ext
 
-- [ ] **LC 206** · Reverse Linked List · Easy · ★ core · worked in guide · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal)
-- [ ] **LC 143** · Reorder List · Medium · ★ core · worked in guide · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal)
-- [ ] **LC 25** · Reverse Nodes in k-Group · Hard · worked in guide · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal)
-- [ ] **LC 2** · Add Two Numbers · Medium · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal)
-- [ ] **LC 138** · Copy List with Random Pointer · Medium · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal)
+- [ ] **LC 206** · Reverse Linked List · Easy · ★ core · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](../computer-science/LeetCode_Patterns.md#problem-1--reverse-linked-list-lc-206-easy)
+- [ ] **LC 234** · Palindrome Linked List · Easy · ext · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](../computer-science/LeetCode_Patterns.md#problem-3--palindrome-linked-list-lc-234-medium)
+- [ ] **LC 143** · Reorder List · Medium · ★ core · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](../computer-science/LeetCode_Patterns.md#problem-4--reorder-list-lc-143-medium)
+- [ ] **LC 2** · Add Two Numbers · Medium · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](LeetCode_Solutions.md#lc-2--add-two-numbers--medium)
+- [ ] **LC 138** · Copy List with Random Pointer · Medium · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](LeetCode_Solutions.md#lc-138--copy-list-with-random-pointer--medium)
+- [ ] **LC 92** · Reverse Linked List II · Medium · ext · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](../computer-science/LeetCode_Patterns.md#problem-2--reverse-linked-list-ii-lc-92-medium)
+- [ ] **LC 24** · Swap Nodes in Pairs · Medium · ext · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](LeetCode_Solutions.md#lc-24--swap-nodes-in-pairs--medium)
+- [ ] **LC 61** · Rotate List · Medium · ext · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](LeetCode_Solutions.md#lc-61--rotate-list--medium)
+- [ ] **LC 82** · Remove Duplicates from Sorted List II · Medium · ext · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](LeetCode_Solutions.md#lc-82--remove-duplicates-from-sorted-list-ii--medium)
+- [ ] **LC 148** · Sort List · Medium · ext · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](LeetCode_Solutions.md#lc-148--sort-list--medium)
+- [ ] **LC 25** · Reverse Nodes in k-Group · Hard · [§6](../computer-science/LeetCode_Patterns.md#6-in-place-linked-list-reversal) · [solution](../computer-science/LeetCode_Patterns.md#problem-5--reverse-nodes-in-k-group-lc-25-hard)
 
 ### 2.7 BFS (Breadth-First Search)
 
-Pattern guide: [LeetCode Patterns §7 BFS (Breadth-First Search)](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · 6 problems (0E / 5M / 1H) · 1 core
+Pattern guide: [LeetCode Patterns §7 BFS (Breadth-First Search)](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · 17 problems (0E / 14M / 3H) · 1 core · 11 ext
 
-LC 743 is the bridge from BFS to Dijkstra: its edges are weighted, so plain BFS gives wrong answers. Its worked solution is in [LeetCode Patterns §27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns).
+LC 743 is the bridge from BFS to Dijkstra: its edges are weighted, so plain BFS gives wrong answers. It and the other weighted-graph problems in this group (787, 1631, 1368, 847) link to [LeetCode Patterns §27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns). LC 1514 is solved in [LeetCode Solutions](LeetCode_Solutions.md#7-bfs-breadth-first-search).
 
-- [ ] **LC 102** · Binary Tree Level Order Traversal · Medium · ★ core · worked in guide · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search)
-- [ ] **LC 199** · Binary Tree Right Side View · Medium · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search)
-- [ ] **LC 994** · Rotting Oranges · Medium · worked in guide · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search)
-- [ ] **LC 127** · Word Ladder · Hard · worked in guide · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search)
-- [ ] **LC 542** · 01 Matrix · Medium · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search)
-- [ ] **LC 743** · Network Delay Time · Medium · worked in guide · [§27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns)
+- [ ] **LC 102** · Binary Tree Level Order Traversal · Medium · ★ core · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-1--binary-tree-level-order-traversal-lc-102-easy)
+- [ ] **LC 199** · Binary Tree Right Side View · Medium · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-199--binary-tree-right-side-view--medium)
+- [ ] **LC 994** · Rotting Oranges · Medium · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-3--rotting-oranges-lc-994-medium)
+- [ ] **LC 542** · 01 Matrix · Medium · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-542--01-matrix--medium)
+- [ ] **LC 743** · Network Delay Time · Medium · [§27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-network-delay-time-lc-743--medium)
+- [ ] **LC 103** · Binary Tree Zigzag Level Order Traversal · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-2--binary-tree-zigzag-level-order-traversal-lc-103-medium)
+- [ ] **LC 787** · Cheapest Flights Within K Stops · Medium · ext · [§27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-cheapest-flights-within-k-stops-lc-787--medium)
+- [ ] **LC 1091** · Shortest Path in Binary Matrix · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-5--shortest-path-in-binary-matrix-lc-1091-hard)
+- [ ] **LC 1631** · Path With Minimum Effort · Medium · ext · [§27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-path-with-minimum-effort-lc-1631--medium)
+- [ ] **LC 130** · Surrounded Regions · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-130--surrounded-regions--medium)
+- [ ] **LC 433** · Minimum Genetic Mutation · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-433--minimum-genetic-mutation--medium)
+- [ ] **LC 934** · Shortest Bridge · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-934--shortest-bridge--medium)
+- [ ] **LC 310** · Minimum Height Trees · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-310--minimum-height-trees--medium)
+- [ ] **LC 1514** · Path with Maximum Probability · Medium · ext · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](LeetCode_Solutions.md#lc-1514--path-with-maximum-probability--medium)
+- [ ] **LC 127** · Word Ladder · Hard · [§7](../computer-science/LeetCode_Patterns.md#7-bfs-breadth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-4--word-ladder-lc-127-medium)
+- [ ] **LC 847** · Shortest Path Visiting All Nodes · Hard · ext · [§27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-shortest-path-visiting-all-nodes-lc-847--hard)
+- [ ] **LC 1368** · Minimum Cost to Make at Least One Valid Path in a Grid · Hard · ext · [§27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-minimum-cost-to-make-at-least-one-valid-path-in-a-grid-lc-1368--hard)
 
 ### 2.8 DFS (Depth-First Search)
 
-Pattern guide: [LeetCode Patterns §8 DFS (Depth-First Search)](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · 13 problems (3E / 8M / 2H) · 11 core
+Pattern guide: [LeetCode Patterns §8 DFS (Depth-First Search)](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · 26 problems (7E / 16M / 3H) · 11 core · 13 ext
 
-- [ ] **LC 104** · Maximum Depth of Binary Tree · Easy · ★ core · worked in guide · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 226** · Invert Binary Tree · Easy · ★ core · worked in guide · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 543** · Diameter of Binary Tree · Easy · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 235** · Lowest Common Ancestor of a Binary Search Tree · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 236** · Lowest Common Ancestor of a Binary Tree · Medium · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 98** · Validate Binary Search Tree · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 230** · Kth Smallest Element in a BST · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 105** · Construct Binary Tree from Preorder and Inorder Traversal · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 124** · Binary Tree Maximum Path Sum · Hard · ★ core · worked in guide · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 297** · Serialize and Deserialize Binary Tree · Hard · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 200** · Number of Islands · Medium · ★ core · worked in guide · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 417** · Pacific Atlantic Water Flow · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
-- [ ] **LC 133** · Clone Graph · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search)
+- [ ] **LC 104** · Maximum Depth of Binary Tree · Easy · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-1--maximum-depth-of-binary-tree-lc-104-easy)
+- [ ] **LC 226** · Invert Binary Tree · Easy · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-2--invert-binary-tree-lc-226-easy)
+- [ ] **LC 543** · Diameter of Binary Tree · Easy · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-11--diameter-of-binary-tree-lc-543-easy)
+- [ ] **LC 100** · Same Tree · Easy · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-100--same-tree--easy)
+- [ ] **LC 101** · Symmetric Tree · Easy · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-101--symmetric-tree--easy)
+- [ ] **LC 110** · Balanced Binary Tree · Easy · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-110--balanced-binary-tree--easy)
+- [ ] **LC 572** · Subtree of Another Tree · Easy · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-572--subtree-of-another-tree--easy)
+- [ ] **LC 235** · Lowest Common Ancestor of a Binary Search Tree · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-235--lowest-common-ancestor-of-a-binary-search-tree--medium)
+- [ ] **LC 236** · Lowest Common Ancestor of a Binary Tree · Medium · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-7--lowest-common-ancestor-of-a-binary-tree-lc-236-medium)
+- [ ] **LC 98** · Validate Binary Search Tree · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-6--validate-binary-search-tree-lc-98-medium)
+- [ ] **LC 230** · Kth Smallest Element in a BST · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-10--kth-smallest-element-in-a-bst-lc-230-medium)
+- [ ] **LC 105** · Construct Binary Tree from Preorder and Inorder Traversal · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-8--construct-binary-tree-from-preorder-and-inorder-traversal-lc-105-medium)
+- [ ] **LC 200** · Number of Islands · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-3--number-of-islands-lc-200-medium)
+- [ ] **LC 417** · Pacific Atlantic Water Flow · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-417--pacific-atlantic-water-flow--medium)
+- [ ] **LC 133** · Clone Graph · Medium · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-133--clone-graph--medium)
+- [ ] **LC 113** · Path Sum II · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-4--path-sum-ii-lc-113-medium)
+- [ ] **LC 1448** · Count Good Nodes in Binary Tree · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-1448--count-good-nodes-in-binary-tree--medium)
+- [ ] **LC 114** · Flatten Binary Tree to Linked List · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-114--flatten-binary-tree-to-linked-list--medium)
+- [ ] **LC 116** · Populating Next Right Pointers in Each Node · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-116--populating-next-right-pointers-in-each-node--medium)
+- [ ] **LC 437** · Path Sum III · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-437--path-sum-iii--medium)
+- [ ] **LC 450** · Delete Node in a BST · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-450--delete-node-in-a-bst--medium)
+- [ ] **LC 695** · Max Area of Island · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-695--max-area-of-island--medium)
+- [ ] **LC 863** · All Nodes Distance K in Binary Tree · Medium · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](LeetCode_Solutions.md#lc-863--all-nodes-distance-k-in-binary-tree--medium)
+- [ ] **LC 124** · Binary Tree Maximum Path Sum · Hard · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-5--binary-tree-maximum-path-sum-lc-124-hard)
+- [ ] **LC 297** · Serialize and Deserialize Binary Tree · Hard · ★ core · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-9--serialize-and-deserialize-binary-tree-lc-297-hard)
+- [ ] **LC 1192** · Critical Connections in a Network · Hard · ext · [§8](../computer-science/LeetCode_Patterns.md#8-dfs-depth-first-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-12--critical-connections-in-a-network-lc-1192-hard)
 
 ### 2.9 Two Heaps
 
-Pattern guide: [LeetCode Patterns §9 Two Heaps](../computer-science/LeetCode_Patterns.md#9-two-heaps) · 2 problems (0E / 0M / 2H) · 1 core
+Pattern guide: [LeetCode Patterns §9 Two Heaps](../computer-science/LeetCode_Patterns.md#9-two-heaps) · 4 problems (1E / 0M / 3H) · 1 core · 2 ext
 
-- [ ] **LC 295** · Find Median from Data Stream · Hard · ★ core · worked in guide · [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps)
-- [ ] **LC 480** · Sliding Window Median · Hard · worked in guide · [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps)
+- [ ] **LC 1046** · Last Stone Weight · Easy · ext · [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps) · [solution](../computer-science/LeetCode_Patterns.md#1-last-stone-weight-lc-1046--easy)
+- [ ] **LC 295** · Find Median from Data Stream · Hard · ★ core · [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps) · [solution](../computer-science/LeetCode_Patterns.md#2-find-median-from-data-stream-lc-295--medium)
+- [ ] **LC 480** · Sliding Window Median · Hard · [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps) · [solution](../computer-science/LeetCode_Patterns.md#4-sliding-window-median-lc-480--hard)
+- [ ] **LC 502** · IPO · Hard · ext · [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps) · [solution](../computer-science/LeetCode_Patterns.md#5-ipo-lc-502--hard)
 
 ### 2.10 Subsets / Backtracking
 
-Pattern guide: [LeetCode Patterns §10 Subsets / Backtracking](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · 6 problems (0E / 5M / 1H) · 1 core
+Pattern guide: [LeetCode Patterns §10 Subsets / Backtracking](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · 12 problems (0E / 10M / 2H) · 1 core · 6 ext
 
-- [ ] **LC 78** · Subsets · Medium · worked in guide · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking)
-- [ ] **LC 46** · Permutations · Medium · worked in guide · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking)
-- [ ] **LC 39** · Combination Sum · Medium · worked in guide · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking)
-- [ ] **LC 79** · Word Search · Medium · ★ core · worked in guide · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking)
-- [ ] **LC 22** · Generate Parentheses · Medium · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking)
-- [ ] **LC 51** · N-Queens · Hard · worked in guide · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking)
+- [ ] **LC 78** · Subsets · Medium · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](../computer-science/LeetCode_Patterns.md#1-subsets-lc-78--medium)
+- [ ] **LC 46** · Permutations · Medium · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](../computer-science/LeetCode_Patterns.md#2-permutations-lc-46--medium)
+- [ ] **LC 39** · Combination Sum · Medium · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](../computer-science/LeetCode_Patterns.md#3-combination-sum-lc-39--medium)
+- [ ] **LC 79** · Word Search · Medium · ★ core · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](../computer-science/LeetCode_Patterns.md#4-word-search-lc-79--medium)
+- [ ] **LC 22** · Generate Parentheses · Medium · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-22--generate-parentheses--medium)
+- [ ] **LC 17** · Letter Combinations of a Phone Number · Medium · ext · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-17--letter-combinations-of-a-phone-number--medium)
+- [ ] **LC 77** · Combinations · Medium · ext · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-77--combinations--medium)
+- [ ] **LC 90** · Subsets II · Medium · ext · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-90--subsets-ii--medium)
+- [ ] **LC 40** · Combination Sum II · Medium · ext · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-40--combination-sum-ii--medium)
+- [ ] **LC 131** · Palindrome Partitioning · Medium · ext · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-131--palindrome-partitioning--medium)
+- [ ] **LC 51** · N-Queens · Hard · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](../computer-science/LeetCode_Patterns.md#5-n-queens-lc-51--hard)
+- [ ] **LC 37** · Sudoku Solver · Hard · ext · [§10](../computer-science/LeetCode_Patterns.md#10-subsets--backtracking) · [solution](LeetCode_Solutions.md#lc-37--sudoku-solver--hard)
 
 ### 2.11 Modified Binary Search
 
-Pattern guide: [LeetCode Patterns §11 Modified Binary Search](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · 7 problems (0E / 5M / 2H) · 3 core
+Pattern guide: [LeetCode Patterns §11 Modified Binary Search](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · 15 problems (4E / 8M / 3H) · 3 core · 8 ext
 
-- [ ] **LC 34** · Find First and Last Position of Element in Sorted Array · Medium · worked in guide · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
-- [ ] **LC 33** · Search in Rotated Sorted Array · Medium · ★ core · worked in guide · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
-- [ ] **LC 153** · Find Minimum in Rotated Sorted Array · Medium · ★ core · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
-- [ ] **LC 162** · Find Peak Element · Medium · worked in guide · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
-- [ ] **LC 875** · Koko Eating Bananas · Medium · ★ core · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
-- [ ] **LC 410** · Split Array Largest Sum · Hard · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
-- [ ] **LC 4** · Median of Two Sorted Arrays · Hard · worked in guide · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search)
+- [ ] **LC 69** · Sqrt(x) · Easy · ext · [§32](../computer-science/LeetCode_Patterns.md#32-math--number-theory) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-sqrtx-lc-69--easy)
+- [ ] **LC 704** · Binary Search · Easy · ext · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-binary-search-lc-704--easy)
+- [ ] **LC 35** · Search Insert Position · Easy · ext · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](LeetCode_Solutions.md#lc-35--search-insert-position--easy)
+- [ ] **LC 278** · First Bad Version · Easy · ext · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](LeetCode_Solutions.md#lc-278--first-bad-version--easy)
+- [ ] **LC 34** · Find First and Last Position of Element in Sorted Array · Medium · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-find-first-and-last-position-of-element-in-sorted-array-lc-34--medium)
+- [ ] **LC 33** · Search in Rotated Sorted Array · Medium · ★ core · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-search-in-rotated-sorted-array-lc-33--medium)
+- [ ] **LC 153** · Find Minimum in Rotated Sorted Array · Medium · ★ core · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](LeetCode_Solutions.md#lc-153--find-minimum-in-rotated-sorted-array--medium)
+- [ ] **LC 162** · Find Peak Element · Medium · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-find-peak-element-lc-162--medium)
+- [ ] **LC 875** · Koko Eating Bananas · Medium · ★ core · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-koko-eating-bananas-lc-875--medium)
+- [ ] **LC 1011** · Capacity To Ship Packages Within D Days · Medium · ext · [§28](../computer-science/LeetCode_Patterns.md#28-binary-search-on-the-answer) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-capacity-to-ship-packages-within-d-days-lc-1011--medium)
+- [ ] **LC 1552** · Magnetic Force Between Two Balls · Medium · ext · [§28](../computer-science/LeetCode_Patterns.md#28-binary-search-on-the-answer) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-magnetic-force-between-two-balls-lc-1552--medium)
+- [ ] **LC 81** · Search in Rotated Sorted Array II · Medium · ext · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](LeetCode_Solutions.md#lc-81--search-in-rotated-sorted-array-ii--medium)
+- [ ] **LC 410** · Split Array Largest Sum · Hard · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-split-array-largest-sum-lc-410--hard)
+- [ ] **LC 4** · Median of Two Sorted Arrays · Hard · [§11](../computer-science/LeetCode_Patterns.md#11-modified-binary-search) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-median-of-two-sorted-arrays-lc-4--hard)
+- [ ] **LC 315** · Count of Smaller Numbers After Self · Hard · ext · [§29](../computer-science/LeetCode_Patterns.md#29-ordered-containers) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-count-of-smaller-numbers-after-self-lc-315--hard)
 
 ### 2.12 Top K Elements
 
-Pattern guide: [LeetCode Patterns §12 Top K Elements](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · 5 problems (1E / 4M / 0H) · 1 core
+Pattern guide: [LeetCode Patterns §12 Top K Elements](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · 9 problems (1E / 8M / 0H) · 1 core · 4 ext
 
-- [ ] **LC 215** · Kth Largest Element in an Array · Medium · worked in guide · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements)
-- [ ] **LC 347** · Top K Frequent Elements · Medium · ★ core · worked in guide · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements)
-- [ ] **LC 973** · K Closest Points to Origin · Medium · worked in guide · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements)
-- [ ] **LC 703** · Kth Largest Element in a Stream · Easy · worked in guide · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) (worked in [§9](../computer-science/LeetCode_Patterns.md#9-two-heaps))
-- [ ] **LC 621** · Task Scheduler · Medium · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements)
+- [ ] **LC 703** · Kth Largest Element in a Stream · Easy · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](../computer-science/LeetCode_Patterns.md#3-kth-largest-element-in-a-stream-lc-703--medium)
+- [ ] **LC 215** · Kth Largest Element in an Array · Medium · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-kth-largest-element-in-an-array-lc-215--medium)
+- [ ] **LC 347** · Top K Frequent Elements · Medium · ★ core · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-top-k-frequent-elements-lc-347--medium)
+- [ ] **LC 973** · K Closest Points to Origin · Medium · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-k-closest-points-to-origin-lc-973--medium)
+- [ ] **LC 621** · Task Scheduler · Medium · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](LeetCode_Solutions.md#lc-621--task-scheduler--medium)
+- [ ] **LC 451** · Sort Characters By Frequency · Medium · ext · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-sort-characters-by-frequency-lc-451--medium)
+- [ ] **LC 767** · Reorganize String · Medium · ext · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](LeetCode_Solutions.md#lc-767--reorganize-string--medium)
+- [ ] **LC 1834** · Single-Threaded CPU · Medium · ext · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](LeetCode_Solutions.md#lc-1834--single-threaded-cpu--medium)
+- [ ] **LC 355** · Design Twitter · Medium · ext · [§12](../computer-science/LeetCode_Patterns.md#12-top-k-elements) · [solution](LeetCode_Solutions.md#lc-355--design-twitter--medium)
 
 ### 2.13 K-way Merge
 
-Pattern guide: [LeetCode Patterns §13 K-way Merge](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · 4 problems (2E / 1M / 1H) · 2 core
+Pattern guide: [LeetCode Patterns §13 K-way Merge](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · 6 problems (2E / 2M / 2H) · 2 core · 2 ext
 
-- [ ] **LC 21** · Merge Two Sorted Lists · Easy · ★ core · worked in guide · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge)
-- [ ] **LC 23** · Merge k Sorted Lists · Hard · ★ core · worked in guide · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge)
-- [ ] **LC 88** · Merge Sorted Array · Easy · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge)
-- [ ] **LC 378** · Kth Smallest Element in a Sorted Matrix · Medium · worked in guide · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge)
+- [ ] **LC 21** · Merge Two Sorted Lists · Easy · ★ core · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-merge-two-sorted-lists-lc-21--medium)
+- [ ] **LC 88** · Merge Sorted Array · Easy · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · [solution](LeetCode_Solutions.md#lc-88--merge-sorted-array--easy)
+- [ ] **LC 378** · Kth Smallest Element in a Sorted Matrix · Medium · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-kth-smallest-element-in-a-sorted-matrix-lc-378--medium)
+- [ ] **LC 373** · Find K Pairs with Smallest Sums · Medium · ext · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-find-k-pairs-with-smallest-sums-lc-373--medium)
+- [ ] **LC 23** · Merge k Sorted Lists · Hard · ★ core · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-merge-k-sorted-lists-lc-23--hard)
+- [ ] **LC 632** · Smallest Range Covering Elements from K Lists · Hard · ext · [§13](../computer-science/LeetCode_Patterns.md#13-k-way-merge) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-smallest-range-covering-elements-from-k-lists-lc-632--hard)
 
 ### 2.14 Topological Sort
 
-Pattern guide: [LeetCode Patterns §14 Topological Sort](../computer-science/LeetCode_Patterns.md#14-topological-sort) · 4 problems (0E / 2M / 2H) · 2 core
+Pattern guide: [LeetCode Patterns §14 Topological Sort](../computer-science/LeetCode_Patterns.md#14-topological-sort) · 9 problems (0E / 5M / 4H) · 2 core · 5 ext
 
-- [ ] **LC 207** · Course Schedule · Medium · ★ core · worked in guide · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort)
-- [ ] **LC 210** · Course Schedule II · Medium · worked in guide · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort)
-- [ ] **LC 269** · Alien Dictionary · Hard · ★ core · worked in guide · premium · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort)
-- [ ] **LC 329** · Longest Increasing Path in a Matrix · Hard · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort)
+- [ ] **LC 207** · Course Schedule · Medium · ★ core · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-course-schedule-lc-207--medium)
+- [ ] **LC 210** · Course Schedule II · Medium · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-course-schedule-ii-lc-210--medium)
+- [ ] **LC 1462** · Course Schedule IV · Medium · ext · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-course-schedule-iv-lc-1462--medium)
+- [ ] **LC 802** · Find Eventual Safe States · Medium · ext · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](LeetCode_Solutions.md#lc-802--find-eventual-safe-states--medium)
+- [ ] **LC 2115** · Find All Possible Recipes from Given Supplies · Medium · ext · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](LeetCode_Solutions.md#lc-2115--find-all-possible-recipes-from-given-supplies--medium)
+- [ ] **LC 269** · Alien Dictionary · Hard · ★ core · premium · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-alien-dictionary-lc-269--hard)
+- [ ] **LC 329** · Longest Increasing Path in a Matrix · Hard · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](LeetCode_Solutions.md#lc-329--longest-increasing-path-in-a-matrix--hard)
+- [ ] **LC 332** · Reconstruct Itinerary · Hard · ext · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-reconstruct-itinerary-lc-332--hard)
+- [ ] **LC 2050** · Parallel Courses III · Hard · ext · [§14](../computer-science/LeetCode_Patterns.md#14-topological-sort) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-parallel-courses-iii-lc-2050--hard)
 
 ### 2.15 Monotonic Stack / Queue
 
-Pattern guide: [LeetCode Patterns §15 Monotonic Stack / Queue](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · 6 problems (1E / 3M / 2H) · 2 core
+Pattern guide: [LeetCode Patterns §15 Monotonic Stack / Queue](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · 12 problems (1E / 8M / 3H) · 2 core · 6 ext
 
-- [ ] **LC 496** · Next Greater Element I · Easy · worked in guide · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue)
-- [ ] **LC 739** · Daily Temperatures · Medium · ★ core · worked in guide · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue)
-- [ ] **LC 853** · Car Fleet · Medium · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue)
-- [ ] **LC 402** · Remove K Digits · Medium · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue)
-- [ ] **LC 84** · Largest Rectangle in Histogram · Hard · worked in guide · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue)
-- [ ] **LC 239** · Sliding Window Maximum · Hard · ★ core · worked in guide · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue)
+- [ ] **LC 496** · Next Greater Element I · Easy · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-next-greater-element-i-lc-496--easy)
+- [ ] **LC 739** · Daily Temperatures · Medium · ★ core · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-daily-temperatures-lc-739--medium)
+- [ ] **LC 853** · Car Fleet · Medium · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](LeetCode_Solutions.md#lc-853--car-fleet--medium)
+- [ ] **LC 402** · Remove K Digits · Medium · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](LeetCode_Solutions.md#lc-402--remove-k-digits--medium)
+- [ ] **LC 503** · Next Greater Element II · Medium · ext · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-next-greater-element-ii-lc-503--medium)
+- [ ] **LC 1438** · Longest Continuous Subarray With Absolute Diff Less Than or Equal to Limit · Medium · ext · [§29](../computer-science/LeetCode_Patterns.md#29-ordered-containers) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-longest-continuous-subarray-with-absolute-diff-less-than-or-equal-to-limit-lc-1438--medium)
+- [ ] **LC 901** · Online Stock Span · Medium · ext · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](LeetCode_Solutions.md#lc-901--online-stock-span--medium)
+- [ ] **LC 1019** · Next Greater Node In Linked List · Medium · ext · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](LeetCode_Solutions.md#lc-1019--next-greater-node-in-linked-list--medium)
+- [ ] **LC 456** · 132 Pattern · Medium · ext · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](LeetCode_Solutions.md#lc-456--132-pattern--medium)
+- [ ] **LC 84** · Largest Rectangle in Histogram · Hard · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-largest-rectangle-in-histogram-lc-84--hard)
+- [ ] **LC 239** · Sliding Window Maximum · Hard · ★ core · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-sliding-window-maximum-lc-239--hard)
+- [ ] **LC 85** · Maximal Rectangle · Hard · ext · [§15](../computer-science/LeetCode_Patterns.md#15-monotonic-stack--queue) · [solution](LeetCode_Solutions.md#lc-85--maximal-rectangle--hard)
 
 ### 2.16 Union Find (Disjoint Set)
 
-Pattern guide: [LeetCode Patterns §16 Union Find (Disjoint Set)](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · 5 problems (0E / 5M / 0H) · 1 core
+Pattern guide: [LeetCode Patterns §16 Union Find (Disjoint Set)](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · 11 problems (0E / 9M / 2H) · 1 core · 6 ext
 
-- [ ] **LC 547** · Number of Provinces · Medium · worked in guide · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set)
-- [ ] **LC 684** · Redundant Connection · Medium · worked in guide · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set)
-- [ ] **LC 721** · Accounts Merge · Medium · worked in guide · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set)
-- [ ] **LC 261** · Graph Valid Tree · Medium · ★ core · premium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set)
-- [ ] **LC 1584** · Min Cost to Connect All Points · Medium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set)
+- [ ] **LC 547** · Number of Provinces · Medium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-number-of-provinces-lc-547--medium)
+- [ ] **LC 684** · Redundant Connection · Medium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-redundant-connection-lc-684--medium)
+- [ ] **LC 721** · Accounts Merge · Medium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-accounts-merge-lc-721--medium)
+- [ ] **LC 261** · Graph Valid Tree · Medium · ★ core · premium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](LeetCode_Solutions.md#lc-261--graph-valid-tree--medium)
+- [ ] **LC 1584** · Min Cost to Connect All Points · Medium · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](LeetCode_Solutions.md#lc-1584--min-cost-to-connect-all-points--medium)
+- [ ] **LC 785** · Is Graph Bipartite? · Medium · ext · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-is-graph-bipartite-lc-785--medium)
+- [ ] **LC 990** · Satisfiability of Equality Equations · Medium · ext · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](LeetCode_Solutions.md#lc-990--satisfiability-of-equality-equations--medium)
+- [ ] **LC 1319** · Number of Operations to Make Network Connected · Medium · ext · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](LeetCode_Solutions.md#lc-1319--number-of-operations-to-make-network-connected--medium)
+- [ ] **LC 399** · Evaluate Division · Medium · ext · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](LeetCode_Solutions.md#lc-399--evaluate-division--medium)
+- [ ] **LC 778** · Swim in Rising Water · Hard · ext · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-swim-in-rising-water-lc-778--hard)
+- [ ] **LC 827** · Making A Large Island · Hard · ext · [§16](../computer-science/LeetCode_Patterns.md#16-union-find-disjoint-set) · [solution](LeetCode_Solutions.md#lc-827--making-a-large-island--hard)
 
 ### 2.17 Trie (Prefix Tree)
 
-Pattern guide: [LeetCode Patterns §17 Trie (Prefix Tree)](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · 4 problems (0E / 3M / 1H) · 3 core
+Pattern guide: [LeetCode Patterns §17 Trie (Prefix Tree)](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · 7 problems (1E / 5M / 1H) · 3 core · 3 ext
 
-- [ ] **LC 208** · Implement Trie (Prefix Tree) · Medium · ★ core · worked in guide · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree)
-- [ ] **LC 211** · Design Add and Search Words Data Structure · Medium · ★ core · worked in guide · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree)
-- [ ] **LC 421** · Maximum XOR of Two Numbers in an Array · Medium · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree)
-- [ ] **LC 212** · Word Search II · Hard · ★ core · worked in guide · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree)
+- [ ] **LC 14** · Longest Common Prefix · Easy · ext · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](LeetCode_Solutions.md#lc-14--longest-common-prefix--easy)
+- [ ] **LC 208** · Implement Trie (Prefix Tree) · Medium · ★ core · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-implement-trie-lc-208--medium)
+- [ ] **LC 211** · Design Add and Search Words Data Structure · Medium · ★ core · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-design-add-and-search-words-data-structure-lc-211--medium)
+- [ ] **LC 421** · Maximum XOR of Two Numbers in an Array · Medium · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](LeetCode_Solutions.md#lc-421--maximum-xor-of-two-numbers-in-an-array--medium)
+- [ ] **LC 648** · Replace Words · Medium · ext · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-replace-words-lc-648--medium)
+- [ ] **LC 1268** · Search Suggestions System · Medium · ext · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](LeetCode_Solutions.md#lc-1268--search-suggestions-system--medium)
+- [ ] **LC 212** · Word Search II · Hard · ★ core · [§17](../computer-science/LeetCode_Patterns.md#17-trie-prefix-tree) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-word-search-ii-lc-212--hard)
 
 ### 2.18 Dynamic Programming
 
-Pattern guide: [LeetCode Patterns §18 Dynamic Programming](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · 14 problems (1E / 13M / 0H) · 11 core
+Pattern guide: [LeetCode Patterns §18 Dynamic Programming](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · 35 problems (2E / 27M / 6H) · 11 core · 21 ext
 
-- [ ] **LC 70** · Climbing Stairs · Easy · ★ core · worked in guide · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 198** · House Robber · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 213** · House Robber II · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 5** · Longest Palindromic Substring · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 91** · Decode Ways · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 322** · Coin Change · Medium · ★ core · worked in guide · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 518** · Coin Change II · Medium · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 152** · Maximum Product Subarray · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 139** · Word Break · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 300** · Longest Increasing Subsequence · Medium · ★ core · worked in guide · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 416** · Partition Equal Subset Sum · Medium · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 62** · Unique Paths · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 1143** · Longest Common Subsequence · Medium · ★ core · worked in guide · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
-- [ ] **LC 72** · Edit Distance · Medium · worked in guide · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming)
+- [ ] **LC 70** · Climbing Stairs · Easy · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-climbing-stairs-lc-70--easy)
+- [ ] **LC 746** · Min Cost Climbing Stairs · Easy · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-746--min-cost-climbing-stairs--easy)
+- [ ] **LC 198** · House Robber · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-14-house-robber-i-and-ii-lc-198-213--medium-1d-takeskip)
+- [ ] **LC 213** · House Robber II · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-14-house-robber-i-and-ii-lc-198-213--medium-1d-takeskip)
+- [ ] **LC 5** · Longest Palindromic Substring · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-17-longest-palindromic-substring-lc-5--medium-interval-dp-vs-expand-around-center)
+- [ ] **LC 91** · Decode Ways · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-15-decode-ways-lc-91--medium-1d-fixed-width-segmentation)
+- [ ] **LC 322** · Coin Change · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-coin-change-lc-322--medium)
+- [ ] **LC 518** · Coin Change II · Medium · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-518--coin-change-ii--medium)
+- [ ] **LC 152** · Maximum Product Subarray · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-152--maximum-product-subarray--medium)
+- [ ] **LC 139** · Word Break · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-16-word-break-lc-139--medium-1d-variable-width-segmentation)
+- [ ] **LC 300** · Longest Increasing Subsequence · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-longest-increasing-subsequence-lc-300--medium)
+- [ ] **LC 416** · Partition Equal Subset Sum · Medium · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-9-partition-equal-subset-sum-lc-416--medium-partition-dp)
+- [ ] **LC 62** · Unique Paths · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-62--unique-paths--medium)
+- [ ] **LC 1143** · Longest Common Subsequence · Medium · ★ core · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-longest-common-subsequence-lc-1143--medium)
+- [ ] **LC 72** · Edit Distance · Medium · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-edit-distance-lc-72--hard)
+- [ ] **LC 122** · Best Time to Buy and Sell Stock II · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-best-time-to-buy-and-sell-stock-iiv-cooldown-fee-lc-121-122-123-188-309-714-state-machine)
+- [ ] **LC 309** · Best Time to Buy and Sell Stock with Cooldown · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-best-time-to-buy-and-sell-stock-iiv-cooldown-fee-lc-121-122-123-188-309-714-state-machine)
+- [ ] **LC 337** · House Robber III · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-house-robber-iii-lc-337--medium-tree-dp)
+- [ ] **LC 494** · Target Sum · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-10-target-sum-lc-494--medium-partition-dp)
+- [ ] **LC 698** · Partition to K Equal Sum Subsets · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-11-partition-to-k-equal-sum-subsets-lc-698--medium-bitmask-dp)
+- [ ] **LC 714** · Best Time to Buy and Sell Stock with Transaction Fee · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-best-time-to-buy-and-sell-stock-iiv-cooldown-fee-lc-121-122-123-188-309-714-state-machine)
+- [ ] **LC 63** · Unique Paths II · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-63--unique-paths-ii--medium)
+- [ ] **LC 64** · Minimum Path Sum · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-64--minimum-path-sum--medium)
+- [ ] **LC 120** · Triangle · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-120--triangle--medium)
+- [ ] **LC 279** · Perfect Squares · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-279--perfect-squares--medium)
+- [ ] **LC 377** · Combination Sum IV · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-377--combination-sum-iv--medium)
+- [ ] **LC 647** · Palindromic Substrings · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-647--palindromic-substrings--medium)
+- [ ] **LC 516** · Longest Palindromic Subsequence · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-516--longest-palindromic-subsequence--medium)
+- [ ] **LC 97** · Interleaving String · Medium · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-97--interleaving-string--medium)
+- [ ] **LC 123** · Best Time to Buy and Sell Stock III · Hard · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-best-time-to-buy-and-sell-stock-iiv-cooldown-fee-lc-121-122-123-188-309-714-state-machine)
+- [ ] **LC 188** · Best Time to Buy and Sell Stock IV · Hard · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-best-time-to-buy-and-sell-stock-iiv-cooldown-fee-lc-121-122-123-188-309-714-state-machine)
+- [ ] **LC 312** · Burst Balloons · Hard · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](../computer-science/LeetCode_Patterns.md#problem-8-burst-balloons-lc-312--hard-interval-dp)
+- [ ] **LC 115** · Distinct Subsequences · Hard · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-115--distinct-subsequences--hard)
+- [ ] **LC 10** · Regular Expression Matching · Hard · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-10--regular-expression-matching--hard)
+- [ ] **LC 32** · Longest Valid Parentheses · Hard · ext · [§18](../computer-science/LeetCode_Patterns.md#18-dynamic-programming) · [solution](LeetCode_Solutions.md#lc-32--longest-valid-parentheses--hard)
 
 ### 2.19 Greedy
 
-Pattern guide: [LeetCode Patterns §19 Greedy](../computer-science/LeetCode_Patterns.md#19-greedy) · 5 problems (0E / 5M / 0H) · 2 core
+Pattern guide: [LeetCode Patterns §19 Greedy](../computer-science/LeetCode_Patterns.md#19-greedy) · 8 problems (0E / 7M / 1H) · 2 core · 3 ext
 
-- [ ] **LC 53** · Maximum Subarray · Medium · ★ core · worked in guide · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) (Kadane worked in [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics))
-- [ ] **LC 55** · Jump Game · Medium · ★ core · worked in guide · [§19](../computer-science/LeetCode_Patterns.md#19-greedy)
-- [ ] **LC 45** · Jump Game II · Medium · worked in guide · [§19](../computer-science/LeetCode_Patterns.md#19-greedy)
-- [ ] **LC 134** · Gas Station · Medium · worked in guide · [§19](../computer-science/LeetCode_Patterns.md#19-greedy)
-- [ ] **LC 763** · Partition Labels · Medium · [§19](../computer-science/LeetCode_Patterns.md#19-greedy)
+- [ ] **LC 53** · Maximum Subarray · Medium · ★ core · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-maximum-subarray-lc-53--medium-kadane)
+- [ ] **LC 55** · Jump Game · Medium · ★ core · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](../computer-science/LeetCode_Patterns.md#2-jump-game-lc-55--medium)
+- [ ] **LC 45** · Jump Game II · Medium · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](../computer-science/LeetCode_Patterns.md#3-jump-game-ii-lc-45--medium)
+- [ ] **LC 134** · Gas Station · Medium · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](../computer-science/LeetCode_Patterns.md#4-gas-station-lc-134--medium)
+- [ ] **LC 763** · Partition Labels · Medium · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](LeetCode_Solutions.md#lc-763--partition-labels--medium)
+- [ ] **LC 846** · Hand of Straights · Medium · ext · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](LeetCode_Solutions.md#lc-846--hand-of-straights--medium)
+- [ ] **LC 678** · Valid Parenthesis String · Medium · ext · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](LeetCode_Solutions.md#lc-678--valid-parenthesis-string--medium)
+- [ ] **LC 135** · Candy · Hard · ext · [§19](../computer-science/LeetCode_Patterns.md#19-greedy) · [solution](../computer-science/LeetCode_Patterns.md#5-candy-lc-135--hard)
 
 ### 2.20 Bit Manipulation
 
-Pattern guide: [LeetCode Patterns §20 Bit Manipulation](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · 7 problems (4E / 3M / 0H) · 4 core
+Pattern guide: [LeetCode Patterns §20 Bit Manipulation](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · 10 problems (4E / 6M / 0H) · 4 core · 3 ext
 
-- [ ] **LC 136** · Single Number · Easy · worked in guide · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
-- [ ] **LC 191** · Number of 1 Bits · Easy · ★ core · worked in guide · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
-- [ ] **LC 338** · Counting Bits · Easy · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
-- [ ] **LC 190** · Reverse Bits · Easy · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
-- [ ] **LC 371** · Sum of Two Integers · Medium · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
-- [ ] **LC 137** · Single Number II · Medium · worked in guide · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
-- [ ] **LC 201** · Bitwise AND of Numbers Range · Medium · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation)
+- [ ] **LC 136** · Single Number · Easy · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#1-single-number-lc-136--easy)
+- [ ] **LC 191** · Number of 1 Bits · Easy · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#2-number-of-1-bits-lc-191--easy)
+- [ ] **LC 338** · Counting Bits · Easy · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](LeetCode_Solutions.md#lc-338--counting-bits--easy)
+- [ ] **LC 190** · Reverse Bits · Easy · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](LeetCode_Solutions.md#lc-190--reverse-bits--easy)
+- [ ] **LC 371** · Sum of Two Integers · Medium · ★ core · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](LeetCode_Solutions.md#lc-371--sum-of-two-integers--medium)
+- [ ] **LC 137** · Single Number II · Medium · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#4-single-number-ii-lc-137--medium)
+- [ ] **LC 201** · Bitwise AND of Numbers Range · Medium · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](LeetCode_Solutions.md#lc-201--bitwise-and-of-numbers-range--medium)
+- [ ] **LC 50** · Pow(x, n) · Medium · ext · [§32](../computer-science/LeetCode_Patterns.md#32-math--number-theory) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-powx-n-lc-50--medium)
+- [ ] **LC 260** · Single Number III · Medium · ext · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#5-single-number-iii-lc-260--medium)
+- [ ] **LC 7** · Reverse Integer · Medium · ext · [§20](../computer-science/LeetCode_Patterns.md#20-bit-manipulation) · [solution](LeetCode_Solutions.md#lc-7--reverse-integer--medium)
 
 ### 2.21 Prefix Sum & Difference Array
 
-Pattern guide: [LeetCode Patterns §21 Prefix Sum & Difference Array](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · 5 problems (0E / 5M / 0H) · 1 core
+Pattern guide: [LeetCode Patterns §21 Prefix Sum & Difference Array](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · 9 problems (1E / 8M / 0H) · 1 core · 4 ext
 
-- [ ] **LC 560** · Subarray Sum Equals K · Medium · ★ core · worked in guide · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array)
-- [ ] **LC 525** · Contiguous Array · Medium · worked in guide · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array)
-- [ ] **LC 523** · Continuous Subarray Sum · Medium · worked in guide · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array)
-- [ ] **LC 304** · Range Sum Query 2D - Immutable · Medium · worked in guide · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array)
-- [ ] **LC 1094** · Car Pooling · Medium · worked in guide · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array)
+- [ ] **LC 303** · Range Sum Query - Immutable · Easy · ext · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](LeetCode_Solutions.md#lc-303--range-sum-query---immutable--easy)
+- [ ] **LC 560** · Subarray Sum Equals K · Medium · ★ core · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-subarray-sum-equals-k-lc-560--medium)
+- [ ] **LC 525** · Contiguous Array · Medium · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-contiguous-array-lc-525--medium)
+- [ ] **LC 523** · Continuous Subarray Sum · Medium · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-continuous-subarray-sum-lc-523--medium)
+- [ ] **LC 304** · Range Sum Query 2D - Immutable · Medium · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-range-sum-query-2d---immutable-lc-304--medium)
+- [ ] **LC 1094** · Car Pooling · Medium · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-car-pooling-lc-1094--medium)
+- [ ] **LC 528** · Random Pick with Weight · Medium · ext · [§31](../computer-science/LeetCode_Patterns.md#31-randomized-algorithms) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-random-pick-with-weight-lc-528--medium)
+- [ ] **LC 1109** · Corporate Flight Bookings · Medium · ext · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-corporate-flight-bookings-lc-1109--medium)
+- [ ] **LC 974** · Subarray Sums Divisible by K · Medium · ext · [§21](../computer-science/LeetCode_Patterns.md#21-prefix-sum--difference-array) · [solution](LeetCode_Solutions.md#lc-974--subarray-sums-divisible-by-k--medium)
 
 ### 2.22 Hashing & Array Classics
 
-Pattern guide: [LeetCode Patterns §22 Hashing & Array Classics](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · 8 problems (3E / 5M / 0H) · 7 core
+Pattern guide: [LeetCode Patterns §22 Hashing & Array Classics](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · 19 problems (7E / 10M / 2H) · 7 core · 11 ext
 
-- [ ] **LC 1** · Two Sum · Easy · ★ core · worked in guide · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 217** · Contains Duplicate · Easy · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 242** · Valid Anagram · Easy · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 49** · Group Anagrams · Medium · ★ core · worked in guide · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 128** · Longest Consecutive Sequence · Medium · ★ core · worked in guide · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 238** · Product of Array Except Self · Medium · ★ core · worked in guide · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 271** · Encode and Decode Strings · Medium · ★ core · premium · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
-- [ ] **LC 31** · Next Permutation · Medium · worked in guide · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics)
+- [ ] **LC 1** · Two Sum · Easy · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-two-sum-lc-1--easy)
+- [ ] **LC 217** · Contains Duplicate · Easy · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](LeetCode_Solutions.md#lc-217--contains-duplicate--easy)
+- [ ] **LC 242** · Valid Anagram · Easy · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](LeetCode_Solutions.md#lc-242--valid-anagram--easy)
+- [ ] **LC 28** · Find the Index of the First Occurrence in a String · Easy · ext · [§30](../computer-science/LeetCode_Patterns.md#30-string-hashing--matching-in-practice) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-find-the-index-of-the-first-occurrence-in-a-string-lc-28--easy)
+- [ ] **LC 169** · Majority Element · Easy · ext · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-majority-element-lc-169--easy-boyermoore-voting)
+- [ ] **LC 459** · Repeated Substring Pattern · Easy · ext · [§30](../computer-science/LeetCode_Patterns.md#30-string-hashing--matching-in-practice) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-repeated-substring-pattern-lc-459--easy)
+- [ ] **LC 205** · Isomorphic Strings · Easy · ext · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](LeetCode_Solutions.md#lc-205--isomorphic-strings--easy)
+- [ ] **LC 49** · Group Anagrams · Medium · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-group-anagrams-lc-49--medium)
+- [ ] **LC 128** · Longest Consecutive Sequence · Medium · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-longest-consecutive-sequence-lc-128--medium)
+- [ ] **LC 238** · Product of Array Except Self · Medium · ★ core · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-product-of-array-except-self-lc-238--medium)
+- [ ] **LC 271** · Encode and Decode Strings · Medium · ★ core · premium · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](LeetCode_Solutions.md#lc-271--encode-and-decode-strings--medium)
+- [ ] **LC 31** · Next Permutation · Medium · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-next-permutation-lc-31--medium)
+- [ ] **LC 187** · Repeated DNA Sequences · Medium · ext · [§30](../computer-science/LeetCode_Patterns.md#30-string-hashing--matching-in-practice) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-repeated-dna-sequences-lc-187--medium)
+- [ ] **LC 189** · Rotate Array · Medium · ext · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](../computer-science/LeetCode_Patterns.md#problem-9-rotate-array-lc-189--medium)
+- [ ] **LC 204** · Count Primes · Medium · ext · [§32](../computer-science/LeetCode_Patterns.md#32-math--number-theory) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-count-primes-lc-204--medium)
+- [ ] **LC 36** · Valid Sudoku · Medium · ext · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](LeetCode_Solutions.md#lc-36--valid-sudoku--medium)
+- [ ] **LC 43** · Multiply Strings · Medium · ext · [§22](../computer-science/LeetCode_Patterns.md#22-hashing--array-classics) · [solution](LeetCode_Solutions.md#lc-43--multiply-strings--medium)
+- [ ] **LC 214** · Shortest Palindrome · Hard · ext · [§30](../computer-science/LeetCode_Patterns.md#30-string-hashing--matching-in-practice) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-shortest-palindrome-lc-214--hard)
+- [ ] **LC 1044** · Longest Duplicate Substring · Hard · ext · [§30](../computer-science/LeetCode_Patterns.md#30-string-hashing--matching-in-practice) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-longest-duplicate-substring-lc-1044--hard)
 
 ### 2.23 Matrix Manipulation
 
-Pattern guide: [LeetCode Patterns §23 Matrix Manipulation](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · 6 problems (1E / 5M / 0H) · 3 core
+Pattern guide: [LeetCode Patterns §23 Matrix Manipulation](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · 8 problems (1E / 7M / 0H) · 3 core · 2 ext
 
-- [ ] **LC 867** · Transpose Matrix · Easy · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation)
-- [ ] **LC 54** · Spiral Matrix · Medium · ★ core · worked in guide · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation)
-- [ ] **LC 48** · Rotate Image · Medium · ★ core · worked in guide · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation)
-- [ ] **LC 73** · Set Matrix Zeroes · Medium · ★ core · worked in guide · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation)
-- [ ] **LC 74** · Search a 2D Matrix · Medium · worked in guide · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation)
-- [ ] **LC 240** · Search a 2D Matrix II · Medium · worked in guide · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation)
+- [ ] **LC 867** · Transpose Matrix · Easy · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](LeetCode_Solutions.md#lc-867--transpose-matrix--easy)
+- [ ] **LC 54** · Spiral Matrix · Medium · ★ core · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-spiral-matrix-lc-54--medium)
+- [ ] **LC 48** · Rotate Image · Medium · ★ core · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-rotate-image-lc-48--medium)
+- [ ] **LC 73** · Set Matrix Zeroes · Medium · ★ core · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-set-matrix-zeroes-lc-73--medium)
+- [ ] **LC 74** · Search a 2D Matrix · Medium · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-search-a-2d-matrix-lc-74--medium)
+- [ ] **LC 240** · Search a 2D Matrix II · Medium · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-search-a-2d-matrix-ii-lc-240--medium)
+- [ ] **LC 289** · Game of Life · Medium · ext · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-game-of-life-lc-289--medium)
+- [ ] **LC 498** · Diagonal Traverse · Medium · ext · [§23](../computer-science/LeetCode_Patterns.md#23-matrix-manipulation) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-diagonal-traverse-lc-498--medium)
 
 ### 2.24 Stack-based Parsing
 
-Pattern guide: [LeetCode Patterns §24 Stack-based Parsing](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · 5 problems (1E / 4M / 0H) · 1 core
+Pattern guide: [LeetCode Patterns §24 Stack-based Parsing](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · 9 problems (1E / 7M / 1H) · 1 core · 4 ext
 
-- [ ] **LC 20** · Valid Parentheses · Easy · ★ core · worked in guide · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing)
-- [ ] **LC 150** · Evaluate Reverse Polish Notation · Medium · worked in guide · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing)
-- [ ] **LC 394** · Decode String · Medium · worked in guide · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing)
-- [ ] **LC 735** · Asteroid Collision · Medium · worked in guide · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing)
-- [ ] **LC 227** · Basic Calculator II · Medium · worked in guide · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing)
+- [ ] **LC 20** · Valid Parentheses · Easy · ★ core · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-valid-parentheses-lc-20--easy)
+- [ ] **LC 150** · Evaluate Reverse Polish Notation · Medium · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-evaluate-reverse-polish-notation-lc-150--medium)
+- [ ] **LC 394** · Decode String · Medium · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-decode-string-lc-394--medium)
+- [ ] **LC 735** · Asteroid Collision · Medium · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-asteroid-collision-lc-735--medium)
+- [ ] **LC 227** · Basic Calculator II · Medium · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-basic-calculator-ii-lc-227--medium)
+- [ ] **LC 71** · Simplify Path · Medium · ext · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-simplify-path-lc-71--medium)
+- [ ] **LC 1249** · Minimum Remove to Make Valid Parentheses · Medium · ext · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](LeetCode_Solutions.md#lc-1249--minimum-remove-to-make-valid-parentheses--medium)
+- [ ] **LC 1209** · Remove All Adjacent Duplicates in String II · Medium · ext · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](LeetCode_Solutions.md#lc-1209--remove-all-adjacent-duplicates-in-string-ii--medium)
+- [ ] **LC 224** · Basic Calculator · Hard · ext · [§24](../computer-science/LeetCode_Patterns.md#24-stack-based-parsing) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-basic-calculator-lc-224--hard)
 
 ### 2.25 Line Sweep & Advanced Intervals
 
-Pattern guide: [LeetCode Patterns §25 Line Sweep & Advanced Intervals](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · 4 problems (0E / 3M / 1H) · 1 core
+Pattern guide: [LeetCode Patterns §25 Line Sweep & Advanced Intervals](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · 6 problems (0E / 4M / 2H) · 1 core · 2 ext
 
-- [ ] **LC 253** · Meeting Rooms II · Medium · ★ core · worked in guide · premium · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals)
-- [ ] **LC 986** · Interval List Intersections · Medium · worked in guide · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals)
-- [ ] **LC 452** · Minimum Number of Arrows to Burst Balloons · Medium · worked in guide · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals)
-- [ ] **LC 218** · The Skyline Problem · Hard · worked in guide · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals)
+- [ ] **LC 253** · Meeting Rooms II · Medium · ★ core · premium · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-meeting-rooms-ii-lc-253--medium)
+- [ ] **LC 986** · Interval List Intersections · Medium · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-interval-list-intersections-lc-986--medium)
+- [ ] **LC 452** · Minimum Number of Arrows to Burst Balloons · Medium · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-minimum-number-of-arrows-to-burst-balloons-lc-452--medium)
+- [ ] **LC 729** · My Calendar I · Medium · ext · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-my-calendar-i-lc-729-and-my-calendar-iii-lc-732)
+- [ ] **LC 218** · The Skyline Problem · Hard · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-the-skyline-problem-lc-218--hard)
+- [ ] **LC 732** · My Calendar III · Hard · ext · [§25](../computer-science/LeetCode_Patterns.md#25-line-sweep--advanced-intervals) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-my-calendar-i-lc-729-and-my-calendar-iii-lc-732)
 
 ### 2.26 Design Problems
 
-Pattern guide: [LeetCode Patterns §26 Design Problems](../computer-science/LeetCode_Patterns.md#26-design-problems) · 6 problems (0E / 5M / 1H) · 1 core
+Pattern guide: [LeetCode Patterns §26 Design Problems](../computer-science/LeetCode_Patterns.md#26-design-problems) · 15 problems (1E / 12M / 2H) · 1 core · 9 ext
 
-- [ ] **LC 146** · LRU Cache · Medium · ★ core · worked in guide · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems)
-- [ ] **LC 155** · Min Stack · Medium · worked in guide · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems)
-- [ ] **LC 380** · Insert Delete GetRandom O(1) · Medium · worked in guide · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems)
-- [ ] **LC 981** · Time Based Key-Value Store · Medium · worked in guide · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems)
-- [ ] **LC 622** · Design Circular Queue · Medium · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems)
-- [ ] **LC 460** · LFU Cache · Hard · worked in guide · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems)
+- [ ] **LC 232** · Implement Queue using Stacks · Easy · ext · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](LeetCode_Solutions.md#lc-232--implement-queue-using-stacks--easy)
+- [ ] **LC 146** · LRU Cache · Medium · ★ core · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-1-lru-cache-lc-146--medium)
+- [ ] **LC 155** · Min Stack · Medium · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-4-min-stack-lc-155--medium)
+- [ ] **LC 380** · Insert Delete GetRandom O(1) · Medium · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-insert-delete-getrandom-o1-lc-380--medium)
+- [ ] **LC 981** · Time Based Key-Value Store · Medium · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-5-time-based-key-value-store-lc-981--medium)
+- [ ] **LC 622** · Design Circular Queue · Medium · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](LeetCode_Solutions.md#lc-622--design-circular-queue--medium)
+- [ ] **LC 173** · Binary Search Tree Iterator · Medium · ext · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-9-binary-search-tree-iterator-lc-173--medium)
+- [ ] **LC 341** · Flatten Nested List Iterator · Medium · ext · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-8-flatten-nested-list-iterator-lc-341--medium)
+- [ ] **LC 362** · Design Hit Counter · Medium · ext · premium · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-7-design-hit-counter-lc-362--medium)
+- [ ] **LC 382** · Linked List Random Node · Medium · ext · [§31](../computer-science/LeetCode_Patterns.md#31-randomized-algorithms) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-linked-list-random-node-lc-382--medium)
+- [ ] **LC 384** · Shuffle an Array · Medium · ext · [§31](../computer-science/LeetCode_Patterns.md#31-randomized-algorithms) · [solution](../computer-science/LeetCode_Patterns.md#problem-3-shuffle-an-array-lc-384--medium)
+- [ ] **LC 1146** · Snapshot Array · Medium · ext · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-6-snapshot-array-lc-1146--medium)
+- [ ] **LC 1396** · Design Underground System · Medium · ext · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](LeetCode_Solutions.md#lc-1396--design-underground-system--medium)
+- [ ] **LC 460** · LFU Cache · Hard · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](../computer-science/LeetCode_Patterns.md#problem-2-lfu-cache-lc-460--hard)
+- [ ] **LC 895** · Maximum Frequency Stack · Hard · ext · [§26](../computer-science/LeetCode_Patterns.md#26-design-problems) · [solution](LeetCode_Solutions.md#lc-895--maximum-frequency-stack--hard)
 
 ---
 
@@ -390,7 +543,7 @@ The core 75 starts from the Blind 75, the widely circulated 75-problem list, and
 | 323 Number of Connected Components | premium, same as 547/261 | 875 Koko Eating Bananas | binary search on the answer |
 | 377 Combination Sum IV | duplicate of the coin-change DP shape | 146 LRU Cache | the most asked design-a-data-structure problem, especially in systems loops |
 
-The removed problems are still useful extra practice, and 252 is still in the 150.
+The removed problems are still useful extra practice. 252 is in the original 150. 100, 572, 647 and 377 are on the checklist as `ext` problems. 323 is covered by 547 and 261.
 
 | # | Pattern | Core problems (LC number) | Count |
 |---|---|---|---|
@@ -426,13 +579,13 @@ The removed problems are still useful extra practice, and 252 is still in the 15
 
 **Q1. Why prioritize a core subset at all, rather than doing the full list in order?**
 
-Coverage grows sublinearly: the first 75 well-chosen problems cover nearly every pattern you will meet, and the next 75 mostly add variants. If your interview date moves up, a completed core 75 with re-solves is a coherent preparation, while half of a pattern-ordered list leaves whole topics (DP, graphs) untouched. Do the core 75 first in pattern order, then fill in the remaining 75.
+Coverage grows sublinearly: the first 75 well-chosen problems cover nearly every pattern you will meet, and the next 75 mostly add variants. If your interview date moves up, a completed core 75 with re-solves is a coherent preparation, while half of a pattern-ordered list leaves whole topics (DP, graphs) untouched. Do the core 75 first in pattern order, then fill in the remaining 75 of the original 150, and only then start the `ext` problems.
 
 ---
 
 ## 4. Bonus Lists: Concurrency, Strings, Shortest Paths
 
-These are **not** part of the 150. They use plain checkboxes without bold so the random picker in Section 9.2 ignores them.
+The concurrency problems in 4.1 are **not** part of the 300. They use plain checkboxes without bold so the random picker in Section 9.2 ignores them. The string and shortest-path problems in 4.2 and 4.3 are now on the main checklist as `ext` problems, so those two sections only list the key idea for each one.
 
 ### 4.1 Concurrency (systems C++ and GPU/HPC loops)
 
@@ -451,27 +604,27 @@ Non-LeetCode prompts that come up in systems loops (implement from scratch, in C
 
 ### 4.2 String algorithms
 
-These go with [DSA Fundamentals §19 String Algorithms](../computer-science/DSA_Fundamentals.md#19-string-algorithms) (KMP, Rabin-Karp, Z-function).
+These go with [DSA Fundamentals §19 String Algorithms](../computer-science/DSA_Fundamentals.md#19-string-algorithms) (KMP, Rabin-Karp, Z-function). All five are on the checklist under [§2.22](#222-hashing--array-classics), with worked solutions in [LeetCode Patterns §30](../computer-science/LeetCode_Patterns.md#30-string-hashing--matching-in-practice).
 
-- [ ] LC 28 · Find the Index of the First Occurrence in a String · Easy (implement KMP, not `find`)
-- [ ] LC 459 · Repeated Substring Pattern · Easy (prefix function: answer is yes if `n % (n - pi[n-1]) == 0` and `pi[n-1] > 0`)
-- [ ] LC 187 · Repeated DNA Sequences · Medium (rolling hash or 2-bit encoding into a 20-bit integer)
-- [ ] LC 214 · Shortest Palindrome · Hard (prefix function of `s + "#" + reverse(s)`)
-- [ ] LC 1044 · Longest Duplicate Substring · Hard (binary search on length + Rabin-Karp)
+- LC 28 · Find the Index of the First Occurrence in a String · Easy: implement KMP, not `find`.
+- LC 459 · Repeated Substring Pattern · Easy: prefix function. The answer is yes if `pi[n-1] > 0` and `n % (n - pi[n-1]) == 0`.
+- LC 187 · Repeated DNA Sequences · Medium: rolling hash, or 2-bit encoding into a 20-bit integer.
+- LC 214 · Shortest Palindrome · Hard: prefix function of `s + "#" + reverse(s)`.
+- LC 1044 · Longest Duplicate Substring · Hard: binary search on the length + Rabin-Karp.
 
 ### 4.3 Weighted shortest paths
 
-These go with [DSA Fundamentals §17 Shortest Path Algorithms](../computer-science/DSA_Fundamentals.md#17-shortest-path-algorithms). LC 743 is already in the 150 (§2.7). Worked solutions for 743, 1631 and 787 are in [LeetCode Patterns §27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns).
+These go with [DSA Fundamentals §17 Shortest Path Algorithms](../computer-science/DSA_Fundamentals.md#17-shortest-path-algorithms). All are on the checklist under [§2.7](#27-bfs-breadth-first-search). Worked solutions for 743, 1631 and 787 are in [LeetCode Patterns §27](../computer-science/LeetCode_Patterns.md#27-weighted-shortest-path-patterns), and 1514 is in [LeetCode Solutions](LeetCode_Solutions.md#7-bfs-breadth-first-search).
 
-- [ ] LC 1631 · Path With Minimum Effort · Medium (Dijkstra on max-edge cost, or binary search + BFS)
-- [ ] LC 1514 · Path with Maximum Probability · Medium (Dijkstra with a max-heap on products)
-- [ ] LC 787 · Cheapest Flights Within K Stops · Medium (Bellman-Ford with K+1 rounds, or BFS over (node, stops))
+- LC 1631 · Path With Minimum Effort · Medium: Dijkstra on max-edge cost, or binary search + BFS.
+- LC 1514 · Path with Maximum Probability · Medium: Dijkstra with a max-heap on products.
+- LC 787 · Cheapest Flights Within K Stops · Medium: Bellman-Ford with K+1 rounds, or BFS over (node, stops).
 
 ---
 
 ## 5. Company-Flavored Lists (Commonly Reported)
 
-> **Not authoritative.** These lists pick problems that match the *style* candidates commonly report for each company's coding rounds. They are not leaked question banks. Loops vary by team, level, and year, so ask your recruiter about format (Section 3 of [Interview Loops and Logistics](../career/Interview_Loops_and_Logistics.md#3-company-loop-profiles)). Problems marked **+** are extras outside the 150.
+> **Not authoritative.** These lists pick problems that match the *style* candidates commonly report for each company's coding rounds. They are not leaked question banks. Loops vary by team, level, and year, so ask your recruiter about format (Section 3 of [Interview Loops and Logistics](../career/Interview_Loops_and_Logistics.md#3-company-loop-profiles)). Problems marked **+** are extras outside the 300.
 
 ### 5.1 Google
 
@@ -489,8 +642,8 @@ These go with [DSA Fundamentals §17 Shortest Path Algorithms](../computer-scien
 | 295 | Find Median from Data Stream | Hard | two heaps; follow-up: values in [0, 100] (counting array) |
 | 212 | Word Search II | Hard | trie + backtracking with pruning |
 | 1143 | Longest Common Subsequence | Medium | 2D DP with an O(min(m, n)) space follow-up |
-| 399 **+** | Evaluate Division | Medium | weighted graph / weighted union-find |
-| 1146 **+** | Snapshot Array | Medium | per-index version lists + binary search (worked in guide §26) |
+| 399 | Evaluate Division | Medium | weighted graph / weighted union-find |
+| 1146 | Snapshot Array | Medium | per-index version lists + binary search |
 
 ### 5.2 Meta
 
@@ -508,9 +661,9 @@ These go with [DSA Fundamentals §17 Shortest Path Algorithms](../computer-scien
 | 162 | Find Peak Element | Medium | binary search on an unsorted array |
 | 138 | Copy List with Random Pointer | Medium | hashmap vs interleaving for O(1) space |
 | 227 | Basic Calculator II | Medium | stack parsing with precedence |
-| 1249 **+** | Minimum Remove to Make Valid Parentheses | Medium | stack of indices |
-| 680 **+** | Valid Palindrome II | Easy | two pointers with one allowed skip |
-| 528 **+** | Random Pick with Weight | Medium | prefix sums + binary search |
+| 1249 | Minimum Remove to Make Valid Parentheses | Medium | stack of indices |
+| 680 | Valid Palindrome II | Easy | two pointers with one allowed skip |
+| 528 | Random Pick with Weight | Medium | prefix sums + binary search |
 | 314 **+** | Binary Tree Vertical Order Traversal | Medium · premium | BFS with column index |
 
 ### 5.3 Amazon
@@ -531,7 +684,7 @@ These go with [DSA Fundamentals §17 Shortest Path Algorithms](../computer-scien
 | 207 | Course Schedule | Medium | cycle detection / Kahn's algorithm |
 | 621 | Task Scheduler | Medium | counting / greedy formula |
 | 937 **+** | Reorder Data in Log Files | Medium | custom sort key |
-| 1268 **+** | Search Suggestions System | Medium | sort + binary search, or trie |
+| 1268 | Search Suggestions System | Medium | sort + binary search, or trie |
 
 ### 5.4 Microsoft
 
@@ -807,7 +960,7 @@ Failures cluster. In most logs, a few root-cause and pattern pairs (for example,
 
 ## 8. Six-Week Coding Schedule
 
-Assumes about 2 hours on weekdays and 3-4 hours on one weekend day. That covers all 150, two re-solve passes on misses, and seven mocks. Each week follows this rhythm:
+Assumes about 2 hours on weekdays and 3-4 hours on one weekend day. That covers the original 150 (no `ext` problems), two re-solve passes on misses, and seven mocks. Each week follows this rhythm:
 
 | Day | Work |
 |---|---|
@@ -826,6 +979,8 @@ Assumes about 2 hours on weekdays and 3-4 hours on one weekend day. That covers 
 | **Total** | | **150** | **75** | **7** | |
 
 Week 6 has fewer new problems on purpose. Spend the slack on the re-solve backlog (all C/D grades should be retired by the end), on [Night Before Cheat Sheet](Night_Before_Cheat_Sheet.md) review, and, for systems roles, on [Concurrency Coding Problems](../computer-science/Concurrency_Coding_Problems.md). If you have only about one hour a day, do the core 75 over the same six weeks (about 13 per week) in the same pattern order.
+
+**Extended list.** The 150 `ext` problems are not in the table. There are two ways to use them. If you have another four to six weeks, run a second pass in the same pattern order at about 25-35 `ext` problems per week, keeping the Saturday mocks; the first pass's re-solves continue alongside. If you do not, add `ext` problems only for patterns your error log flags as weak (Section 1, Q1). In both cases the timed protocol and grades are the same.
 
 This schedule covers coding only. For a full loop, run it alongside system design and behavioral prep: see [STUDY_PLAN](../STUDY_PLAN.md) and [Behavioral Interview Prep](../career/Behavioral_Interview_Prep.md).
 
@@ -871,7 +1026,7 @@ Variants:
 
 ### 9.2 Random problem picker
 
-This script prints random unchecked problems from Section 2 only (the bonus lists and the company tables use a different format, so they are not matched). It prints only number and title, so you have to recognize the pattern yourself. Save it as `pick.py` and run it from the repo root.
+This script prints random unchecked problems from Section 2 only (the bonus lists and the company tables use a different format, so they are not matched). Pass `--no-ext` to draw only from the original 150. It prints only number and title, so you have to recognize the pattern yourself. Save it as `pick.py` and run it from the repo root.
 
 ```python
 #!/usr/bin/env python3
@@ -884,10 +1039,12 @@ import re
 LINE = re.compile(r"^- \[ \] \*\*LC (\d+)\*\* · (.+?) · (Easy|Medium|Hard)\b")
 
 
-def load(path, difficulty):
+def load(path, difficulty, no_ext=False):
     pool, seen = [], set()
     for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
         m = LINE.match(line)
+        if no_ext and m and " · ext · " in line:
+            continue
         if m and m.group(3) == difficulty and m.group(1) not in seen:
             seen.add(m.group(1))
             pool.append((int(m.group(1)), m.group(2)))
@@ -900,8 +1057,9 @@ def main():
     ap.add_argument("-n", type=int, default=2, help="number of problems")
     ap.add_argument("-d", "--difficulty", default="Medium", choices=["Easy", "Medium", "Hard"])
     ap.add_argument("--seed", type=int, help="fix the seed to replay a mock")
+    ap.add_argument("--no-ext", action="store_true", help="only the original 150")
     args = ap.parse_args()
-    pool = load(args.file, args.difficulty)
+    pool = load(args.file, args.difficulty, args.no_ext)
     rng = random.Random(args.seed)
     for num, title in rng.sample(pool, min(args.n, len(pool))):
         print(f"LC {num}: {title}")
@@ -915,6 +1073,7 @@ if __name__ == "__main__":
 python3 pick.py                    # two random unticked mediums
 python3 pick.py -d Hard -n 1       # one hard
 python3 pick.py --seed 42          # reproducible pick, for re-running a mock
+python3 pick.py --no-ext           # only the original 150
 ```
 
 Ticked lines (`- [x]`) are excluded. To include retired problems, temporarily change `\[ \]` in the regex to `\[[ x]\]`.
@@ -948,7 +1107,7 @@ Three ways. First, record and review against the rubric, which catches communica
 
 ## 10. Unsolved Practice Sets by Pattern
 
-Ten patterns, three problems each, with **no solutions here**. None of them are in the 150. Treat each set as a blind check after finishing the pattern: use the time targets from Section 6, then compare with [Answers](#answers) (key insight + complexity). Statements are paraphrased, so check the LeetCode page for the exact constraints.
+Ten patterns, three problems each, with **no solutions here**. None of them are in the 300. Treat each set as a blind check after finishing the pattern: use the time targets from Section 6, then compare with [Answers](#answers) (key insight + complexity). Statements are paraphrased, so check the LeetCode page for the exact constraints.
 
 ### 10.1 Two Pointers
 

@@ -46,7 +46,7 @@
 
 ## How to Use This Guide
 
-> **Companion material.** For a checklist of what to practise (150 problems by pattern, timed protocol, spaced repetition, unsolved sets), use [Coding Problem List](../practice/Coding_Problem_List.md). For how to *perform* in the round (clarify, brute force first, optimise, dry-run, test out loud, time management), use [The Coding-Round Communication Framework](../career/Interview_Loops_and_Logistics.md#7-the-coding-round-communication-framework). Algorithm theory and proofs live in [DSA Fundamentals](DSA_Fundamentals.md).
+> **Companion material.** For a checklist of what to practise (300 problems by pattern, timed protocol, spaced repetition, unsolved sets), use [Coding Problem List](../practice/Coding_Problem_List.md). Each checklist line links to its solution, either in this guide or in [LeetCode Solutions](../practice/LeetCode_Solutions.md), which covers the 111 checklist problems this guide does not work. For how to *perform* in the round (clarify, brute force first, optimise, dry-run, test out loud, time management), use [The Coding-Round Communication Framework](../career/Interview_Loops_and_Logistics.md#7-the-coding-round-communication-framework). Algorithm theory and proofs live in [DSA Fundamentals](DSA_Fundamentals.md).
 
 Most LeetCode problems map to one or more recurring **patterns**. Instead of memorising hundreds of individual solutions, learn the 33 patterns in this guide and you will be able to recognise and solve the vast majority of interview problems.
 
