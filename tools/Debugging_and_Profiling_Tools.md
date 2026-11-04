@@ -1,8 +1,8 @@
 # Debugging and Profiling Tools -- Comprehensive Interview Reference
 
-> Last reviewed: 2026-11 · Versions assumed: GDB 14-17, LLDB 18+, Linux perf 6.x, strace 6.x, bpftrace 0.22+ (BCC tools), Valgrind 3.22+, py-spy 0.4, Python 3.12-3.14, ROCm 6.x/7.x (rocgdb, rocprofv3, amd-smi)
+> Last reviewed: 2026-11 · Versions assumed: GDB 14-17, LLDB 18+, Linux perf 6.x-7.x, strace 6.x, bpftrace 0.22+ (BCC tools), Valgrind 3.22+, py-spy 0.4, Scalene 2.4, memray 1.20, Python 3.12-3.14, ROCm 6.x/7.x (rocgdb, rocprofv3, amd-smi)
 
-> A practical, interview-focused reference for debugging and profiling native (C/C++) and Python programs on Linux. It covers the debuggers (gdb, lldb, rocgdb), core dumps, `perf` and hardware counters, flame graphs and off-CPU analysis, `perf c2c` for false sharing, `strace`/`ltrace`, binutils and ELF inspection, Valgrind and sanitizers, eBPF/bpftrace, Python tools (pdb, faulthandler, py-spy), and the methods that tie them together: USE, RED, scientific debugging, and bisection. It ends with ten production scenarios ("the CPU is at 100%", "the process is hung", "the disk is full but `du` disagrees", "the GPU kernel got slower after a driver update") with step-by-step answers. Each major section closes with interview questions and full answers. The example programs were compiled with GCC 15 and run under GDB 17 on x86-64 Linux. Their gdb output is real, trimmed only for length.
+> A practical, interview-focused reference for debugging and profiling native (C/C++) and Python programs on Linux. It covers the debuggers (gdb, lldb, rocgdb), core dumps, `perf` and hardware counters, flame graphs and off-CPU analysis, `perf c2c` for false sharing, `strace`/`ltrace`, binutils and ELF inspection, Valgrind and sanitizers, eBPF/bpftrace, Python tools (pdb, faulthandler, py-spy, Scalene, memray), a worked top-down (TMA) analysis, AMD IBS and `perf mem`, a map of the wider profiler landscape (VTune, uProf, toplev, likwid, Tracy, pprof, async-profiler, XRay), and the methods that tie them together: USE, RED, scientific debugging, and bisection. It ends with ten production scenarios ("the CPU is at 100%", "the process is hung", "the disk is full but `du` disagrees", "the GPU kernel got slower after a driver update") with step-by-step answers. Each major section closes with interview questions and full answers. The example programs were compiled with GCC 15 and run under GDB 17 on x86-64 Linux. Their gdb output is real, trimmed only for length. The perf, top-down, IBS and `perf c2c` measurements in Sections 8, 9 and 11 were taken on a 2-socket AMD EPYC 9655 (Zen 5) host running Linux 7.0 and perf 7.0, with each program pinned to one core (`taskset -c 16`) and the median of 3 runs reported.
 
 ---
 
@@ -24,7 +24,11 @@
 **Part 3: CPU Profiling with perf**
 
 8. [perf Fundamentals and Hardware Counters](#8-perf-fundamentals-and-hardware-counters)
+   - [8.5 Top-Down Analysis, Worked](#85-top-down-analysis-worked)
+   - [8.6 Interview Questions](#86-interview-questions)
 9. [Sampling Profiles: perf record, report, top, and annotate](#9-sampling-profiles-perf-record-report-top-and-annotate)
+   - [9.7 The Wider Profiler Landscape](#97-the-wider-profiler-landscape)
+   - [9.8 Interview Questions](#98-interview-questions)
 10. [Flame Graphs and Off-CPU Analysis](#10-flame-graphs-and-off-cpu-analysis)
 11. [perf c2c and False Sharing](#11-perf-c2c-and-false-sharing)
 
@@ -915,7 +919,7 @@ perf stat -a -I 1000 -e cycles,instructions           # system-wide, print every
 perf stat -A -a -e cycles -- sleep 5                  # per-CPU breakdown
 perf stat -x, -o stats.csv -e cycles,instructions ./app   # CSV for scripts
 perf stat -M TopdownL1 ./app                          # Intel top-down level 1 (also --topdown)
-perf stat -M PipelineL1 ./app                         # AMD Zen 4+ pipeline-utilization metrics
+perf stat -M PipelineL1,PipelineL2 ./app              # AMD Zen 4+ pipeline utilization, levels 1 and 2
 ```
 
 Illustrative output for a CPU-bound program:
@@ -943,11 +947,341 @@ How to read it:
 - **MPKI** (misses per 1000 instructions) normalizes cache misses: `cache-misses / instructions * 1000`. An LLC MPKI above roughly 5-10 means the working set does not fit and memory latency dominates.
 - **page-faults** high at startup is normal (first touch). Steady growth during a run means continuous allocation and `mmap`/`munmap` churn.
 
-**Top-down analysis (TMA)** splits pipeline slots into four buckets: **Retiring** (useful work), **Bad Speculation** (mispredicted work thrown away), **Frontend Bound** (instruction fetch or decode starved), and **Backend Bound** (split into Memory Bound and Core Bound). Start at level 1 and drill into the largest bucket. It is the CPU analogue of the GPU speed-of-light view in rocprof-compute.
+**Top-down analysis (TMA)** splits pipeline slots into four buckets: **Retiring** (useful work), **Bad Speculation** (mispredicted work thrown away), **Frontend Bound** (instruction fetch or decode starved), and **Backend Bound** (split into Memory Bound and Core Bound). Start at level 1 and drill into the largest bucket. It is the CPU analogue of the GPU speed-of-light view in rocprof-compute. [Section 8.5](#85-top-down-analysis-worked) works through two programs on Zen 5, from counters to a fix and back.
 
-**Measurement hygiene.** Use `-r` for repeated runs and report the spread. Pin to cores (`taskset -c 2`) to avoid migrations. Set the frequency governor to `performance` and watch for turbo and thermal variation. Warm caches and the page cache before measuring. Compare cycles, not just wall time, when the clock frequency moves. See [Performance Engineering](../computer-science/Performance_Engineering.md).
+**Measurement hygiene.** Use `-r` for repeated runs and report the spread. Pin to cores (`taskset -c 2`) to avoid migrations. Set the frequency governor to `performance` and watch for turbo and thermal variation. Warm caches and the page cache before measuring.
 
-### 8.5 Interview Questions
+**Cycles are not frequency-proof.** When the clock moves, comparing cycles instead of wall time removes the frequency effect only for **core-bound** code, where every stall is a fixed number of cycles (an add's latency, a mispredict's flush). A DRAM miss costs a fixed number of **nanoseconds**, so it costs fewer cycles at a lower clock. Memory-bound code therefore shows fewer cycles and a higher IPC at a lower frequency while its wall time barely moves. Arithmetic with the pointer chase from Section 8.5: one dependent DRAM load takes about 116 ns, which is about 525 cycles at the 4.5 GHz this host ran at, but would be about 300 cycles at the 2.6 GHz base clock. For mixed code neither metric is frequency-proof, so pin the frequency (or at least record it: `cycles / ref-cycles`, see [Section 9.1](#91-perf-record)) and compare both wall time and cycles. See [Performance Engineering](../computer-science/Performance_Engineering.md).
+
+### 8.5 Top-Down Analysis, Worked
+
+Raw counters answer narrow questions ("how many L2 misses?") without saying whether they matter. Top-down analysis (Ahmad Yasin, "A Top-Down Method for Performance Analysis and Counters Architecture", ISPASS 2014, [PDF](https://rcs.uwaterloo.ca/~ali/cs854-f23/papers/topdown.pdf)) starts from the one resource every instruction needs, the **pipeline slot**, and asks where each slot went. The categories add up to 100%, so the biggest one is the bottleneck by construction, and you only drill into that branch of the tree.
+
+#### The Slot Model
+
+A slot is one opportunity to pass one micro-op from the frontend to the backend: `slots = width x cycles`. The width is the narrowest point at that boundary. Yasin's Intel implementation uses issue slots on a 4-wide core (`Slots = 4 * CPU_CLK_UNHALTED.THREAD`). Ice Lake and later expose `SLOTS` as fixed counter 3 plus a `PERF_METRICS` register, so level 1 costs no general-purpose counters ([kernel doc: topdown.txt](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/topdown.txt)). AMD Zen 4 and Zen 5 classify **dispatch** slots. Zen 5 dispatches up to 8 macro-ops per cycle ([AMD Zen 5 Software Optimization Guide 58455](https://docs.amd.com/v/u/en-US/58455_1.00), section 2.9.7), and perf defines `total_dispatch_slots = 8 * ls_not_halted_cyc`.
+
+Each slot in each cycle is classified once:
+
+```text
+                         slot in this cycle
+                                 |
+                  did a micro-op go through it?
+                   /                           \
+                 yes                            no
+                  |                              |
+        did that op eventually retire?   was the backend stalled
+          /                \             (no room: ROB, scheduler, LDQ full)?
+        yes                 no             /                   \
+         |                   |           yes                    no
+     RETIRING        BAD SPECULATION   BACKEND BOUND       FRONTEND BOUND
+   (useful work)    (wrong path, flush) (memory or core)   (fetch/decode starved)
+```
+
+Level 1 formulas, Intel from Yasin's Appendix 1 (Ivy Bridge event names) and AMD as defined by perf on this Zen 5 host (`sudo perf list --details metrics`):
+
+| Category | Intel (Yasin 2014) | AMD Zen 5 (perf metric) |
+|---|---|---|
+| Retiring | `UOPS_RETIRED.RETIRE_SLOTS / Slots` | `ex_ret_ops / total_dispatch_slots` |
+| Bad Speculation | `(UOPS_ISSUED.ANY - UOPS_RETIRED.RETIRE_SLOTS + 4 * INT_MISC.RECOVERY_CYCLES) / Slots` | `(de_src_op_disp.all - ex_ret_ops) / total_dispatch_slots` |
+| Frontend Bound | `IDQ_UOPS_NOT_DELIVERED.CORE / Slots` | `de_no_dispatch_per_slot.no_ops_from_frontend / total_dispatch_slots` |
+| Backend Bound | `1 - (Frontend + Bad Speculation + Retiring)` | `de_no_dispatch_per_slot.backend_stalls / total_dispatch_slots` |
+| SMT contention | (not a category) | `de_no_dispatch_per_slot.smt_contention / total_dispatch_slots` |
+
+Two differences matter when you compare reports across vendors. AMD measures Backend Bound directly rather than as the remainder, and it adds a fifth bucket for slots handed to the sibling SMT thread.
+
+Level 2 splits each bucket in two:
+
+| Level 1 | Level 2 (Intel TMA name / AMD perf name) | Split by | Typical first fix |
+|---|---|---|---|
+| Frontend Bound | Fetch Latency / `frontend_bound_by_latency` | cycles with no ops delivered at all (i-cache, i-TLB misses, redirects) | PGO, `-ffunction-sections` plus linker ordering, BOLT, fewer indirect calls |
+| | Fetch Bandwidth / `frontend_bound_by_bandwidth` | some ops delivered, but fewer than the width (decoder, op cache) | tighter hot loops, avoid long or microcoded instructions |
+| Bad Speculation | Branch Mispredicts / `bad_speculation_from_mispredicts` | share of mispredicts vs other flushes | branchless code, sort or partition data, better layout of `if` chains |
+| | Machine Clears / `bad_speculation_from_pipeline_restarts` | memory-ordering clears, self-modifying code, resyncs | fix contended or falsely shared lines, avoid self-modifying code |
+| Retiring | Light Operations / `retiring_from_fastpath` | ops from the normal decoders | vectorize, better algorithm (do less work) |
+| | Heavy Operations, Microcode / `retiring_from_microcode` | microcoded ops | avoid microcoded instructions (the vendor latency tables mark them) |
+| Backend Bound | Memory Bound / `backend_bound_by_memory` | AMD: backend share x (cycles the oldest op waits for load data / cycles the oldest op is not complete) | locality, blocking, prefetch, more misses in flight, huge pages |
+| | Core Bound / `backend_bound_by_cpu` | the rest of the backend share | break dependency chains, cheaper instructions, use more ports |
+
+Intel goes on to level 3 and below (L1, L2, L3 and DRAM Bound, ports utilization, and so on). perf on Zen 5 stops at level 2. For the memory branch, switch tools and sample the loads with IBS ([Section 9.6](#96-other-perf-subcommands-worth-knowing)).
+
+#### Running It on Zen 5
+
+```bash
+sudo perf list metricgroups | grep -i pipeline        # PipelineL1, PipelineL2
+sudo perf stat -M PipelineL1,PipelineL2 -- taskset -c 16 ./app
+sudo perf stat --topdown ./app                        # Intel only: on this host it prints
+                                                      # "Topdown requested but the topdown metric groups aren't present."
+```
+
+Each metric is its own event group, always paired with `ls_not_halted_cyc`, so a ratio such as Retiring is exact within its group. The groups share the 6 core counters by multiplexing, which is why every line shows `(25%)` or `(50%)`. That is fine for a steady loop, but not for a program whose phases change.
+
+**Count only the region you care about.** The pointer-chase program below spends half a second building a 256 MiB permutation before the loop that matters. `perf stat -D -1` starts with counters disabled, and `--control` lets the program itself send `enable` and `disable` through a FIFO (the protocol is in `man perf-stat`):
+
+```bash
+mkfifo ctl.fifo ack.fifo
+sudo PERF_CTL=$PWD/ctl.fifo PERF_ACK=$PWD/ack.fifo \
+    perf stat -M PipelineL1 -D -1 --control fifo:ctl.fifo,ack.fifo -- taskset -c 16 ./chase serial
+```
+
+The program writes `enable\n` to the control FIFO and waits for `ack\n` before it starts the clock, and sends `disable\n` after it stops it. On Intel, `toplev` (below) and VTune offer the same with their own region APIs, and likwid has a marker API ([Section 9.7](#97-the-wider-profiler-landscape)).
+
+#### Worked Example 1: A Pointer Chase (Memory Bound)
+
+```cpp
+// chase.cpp -- g++ -std=c++20 -O2 -g -Wall -Wextra -o chase chase.cpp
+// ./chase serial        8 pointer chases run one after another
+// ./chase interleaved   the same 8 chases advanced in lockstep (8 misses in flight)
+// If PERF_CTL and PERF_ACK name perf's control FIFOs, only the timed loop is counted:
+//   perf stat -D -1 --control fifo:ctl.fifo,ack.fifo -- ./chase serial
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <random>
+#include <utility>
+#include <vector>
+
+#include <fcntl.h>
+#include <unistd.h>
+
+constexpr std::size_t kN = std::size_t{1} << 25;   // 32 Mi entries x 8 B = 256 MiB, far beyond L3
+constexpr int kChains = 8;
+constexpr std::size_t kHops = 4'000'000;           // per chain
+
+// Send "enable" or "disable" to perf and wait for its "ack" (no-op when not run under perf --control).
+static void perf_ctl(const char* cmd) {
+    static int ctl = -1, ack = -1;
+    if (ctl < 0) {
+        const char* c = std::getenv("PERF_CTL");
+        const char* a = std::getenv("PERF_ACK");
+        if (!c || !a) return;
+        ctl = open(c, O_WRONLY);
+        ack = open(a, O_RDONLY);
+        if (ctl < 0 || ack < 0) return;
+    }
+    char buf[8];
+    if (write(ctl, cmd, std::strlen(cmd)) < 0 || read(ack, buf, sizeof buf) < 0) std::perror("perf_ctl");
+}
+
+__attribute__((noinline)) void chase_serial(const std::uint64_t* next, std::uint64_t* p) {
+    for (int c = 0; c < kChains; ++c) {             // each load depends on the previous one
+        std::uint64_t q = p[c];
+        for (std::size_t i = 0; i < kHops; ++i) q = next[q];
+        p[c] = q;
+    }
+}
+
+__attribute__((noinline)) void chase_interleaved(const std::uint64_t* next, std::uint64_t* p) {
+    std::uint64_t q0 = p[0], q1 = p[1], q2 = p[2], q3 = p[3], q4 = p[4], q5 = p[5], q6 = p[6], q7 = p[7];
+    for (std::size_t i = 0; i < kHops; ++i) {       // 8 independent loads per iteration
+        q0 = next[q0]; q1 = next[q1]; q2 = next[q2]; q3 = next[q3];
+        q4 = next[q4]; q5 = next[q5]; q6 = next[q6]; q7 = next[q7];
+    }
+    p[0] = q0; p[1] = q1; p[2] = q2; p[3] = q3; p[4] = q4; p[5] = q5; p[6] = q6; p[7] = q7;
+}
+
+int main(int argc, char** argv) {
+    bool interleaved = argc > 1 && std::strcmp(argv[1], "interleaved") == 0;
+
+    // Sattolo's algorithm: a random permutation that is one single cycle,
+    // so consecutive hops land on unrelated cache lines and no prefetcher can guess the next one.
+    std::vector<std::uint64_t> next(kN);
+    for (std::size_t i = 0; i < kN; ++i) next[i] = i;
+    std::mt19937_64 rng(42);
+    for (std::size_t i = kN - 1; i > 0; --i) {
+        std::uniform_int_distribution<std::size_t> d(0, i - 1);
+        std::swap(next[i], next[d(rng)]);
+    }
+
+    std::uint64_t p[kChains];
+    for (int c = 0; c < kChains; ++c) p[c] = static_cast<std::uint64_t>(c) * (kN / kChains);
+
+    perf_ctl("enable\n");
+    auto t0 = std::chrono::steady_clock::now();
+    if (interleaved) chase_interleaved(next.data(), p);
+    else chase_serial(next.data(), p);
+    std::chrono::duration<double> dt = std::chrono::steady_clock::now() - t0;
+    perf_ctl("disable\n");
+
+    std::uint64_t sink = 0;
+    for (int c = 0; c < kChains; ++c) sink ^= p[c];
+    std::printf("%s: %.3f s, %.1f ns per hop (sink %llu)\n", interleaved ? "interleaved" : "serial",
+                dt.count(), dt.count() * 1e9 / (kChains * kHops), static_cast<unsigned long long>(sink));
+}
+```
+
+**Counters.** Level 1 on the serial version (real output, trimmed):
+
+```text
+$ sudo PERF_CTL=$PWD/ctl.fifo PERF_ACK=$PWD/ack.fifo taskset -c 16 \
+      perf stat -M PipelineL1 -D -1 --control fifo:ctl.fifo,ack.fifo -- ./chase serial
+serial: 3.722 s, 116.3 ns per hop (sink 3907956)
+
+       152,510,727      de_src_op_disp.all               #      0.0 %ops  bad_speculation       (49.95%)
+    16,835,340,004      ls_not_halted_cyc                                                       (49.95%)
+       145,556,518      ex_ret_ops                       #      0.1 %slots  retiring            (49.95%)
+                 0      de_no_dispatch_per_slot.smt_contention #      0.0 %slots  smt_contention      (49.98%)
+       299,934,689      de_no_dispatch_per_slot.no_ops_from_frontend #      0.2 %slots  frontend_bound      (50.05%)
+   134,229,711,115      de_no_dispatch_per_slot.backend_stalls #     99.6 %slots  backend_bound       (50.02%)
+```
+
+**Diagnosis.** 99.7% of the slots are Backend Bound, and level 2 puts all of it in Memory Bound. IPC is 0.009. 16.8 billion cycles for 32 million hops is about 525 cycles, or 116 ns, per hop: one full DRAM round trip per load, with nothing else to do meanwhile because each address comes out of the previous load. IBS confirms it ([Section 9.6](#96-other-perf-subcommands-worth-knowing)): the sampled loads are "RAM hit", with a median miss latency of 478 cycles, and they also miss the L2 TLB.
+
+**Fix.** Software prefetch cannot help a single chain, because the next address is unknown until the current load returns. (Prefetch helps when addresses can be computed ahead, as in `a[idx[i + 16]]`. See [Performance Engineering: Prefetching](../computer-science/Performance_Engineering.md#57-prefetching).) What does help is **memory-level parallelism**: the workload consists of 8 independent chains, so advance them in lockstep, and the core keeps 8 misses in flight instead of 1. The Zen 5 load-store unit can track up to 124 outstanding cache misses (SOG 58455, section 2.12), so 8 is well within its reach.
+
+**Re-measure** (medians of 3 runs, counters for the timed loop only):
+
+| | serial | interleaved |
+|---|---|---|
+| Time, ns per hop | 3.71 s, 116.1 | 0.483 s, 15.1 |
+| Cycles (cycles per hop) | 16.8 G (525) | 2.19 G (68) |
+| IPC | 0.009 | 0.020 |
+| Retiring | 0.10% | 0.23% |
+| Bad Speculation | 0.00% | 0.04% |
+| Frontend Bound | 0.18% | 0.20% |
+| Backend Bound | 99.73% | 99.53% |
+| of which Memory Bound | 99.70% | 99.50% |
+
+The program is 7.7x faster, and the top-down profile **barely changed**. That is the main lesson of this example. Top-down shares say what kind of bottleneck you have, not how close you are to a limit. The loop is still waiting on DRAM in every slot. It now waits for 8 loads at a time, so the 116 ns latency is paid once per 8 hops (116 / 8 = 14.5 ns, against 15.1 ns measured). Judge a fix by time or cycles. Use the breakdown to choose the next fix: still memory-latency bound, so the next steps are more chains in flight, 2 MiB pages to remove the page walks that IBS shows ([Performance Engineering: TLB Effects and Huge Pages](../computer-science/Performance_Engineering.md#58-tlb-effects-and-huge-pages)), or a layout that turns chasing into streaming.
+
+#### Worked Example 2: A Dense FP Loop in L1 (Core Bound)
+
+```cpp
+// dot.cpp -- g++ -std=c++20 -O2 -g -Wall -Wextra -o dot dot.cpp
+// ./dot 1   one accumulator: every add waits for the previous add
+// ./dot 8   eight independent accumulators
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+constexpr int kLen = 1024;          // 2 arrays x 8 KiB: fits in the 48 KiB L1D
+constexpr int kReps = 2'000'000;
+
+__attribute__((noinline)) double dot1(const double* a, const double* b) {
+    double s = 0.0;
+    for (int i = 0; i < kLen; ++i) s += a[i] * b[i];
+    return s;
+}
+
+__attribute__((noinline)) double dot8(const double* a, const double* b) {
+    double s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0;
+    for (int i = 0; i < kLen; i += 8) {     // eight independent dependency chains
+        s0 += a[i + 0] * b[i + 0]; s1 += a[i + 1] * b[i + 1];
+        s2 += a[i + 2] * b[i + 2]; s3 += a[i + 3] * b[i + 3];
+        s4 += a[i + 4] * b[i + 4]; s5 += a[i + 5] * b[i + 5];
+        s6 += a[i + 6] * b[i + 6]; s7 += a[i + 7] * b[i + 7];
+    }
+    return ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
+}
+
+int main(int argc, char** argv) {
+    int acc = argc > 1 ? std::atoi(argv[1]) : 1;
+    std::vector<double> a(kLen), b(kLen);
+    for (int i = 0; i < kLen; ++i) { a[i] = 1.0 + i * 1e-6; b[i] = 1.0 - i * 1e-6; }
+
+    double total = 0.0;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int r = 0; r < kReps; ++r) {
+        total += acc == 8 ? dot8(a.data(), b.data()) : dot1(a.data(), b.data());
+        a[r % kLen] += 1e-9;        // keeps the compiler from hoisting the call out of the loop
+    }
+    std::chrono::duration<double> dt = std::chrono::steady_clock::now() - t0;
+    std::printf("%d accumulator(s): %.3f s, %.3f ns per element (total %.6e)\n", acc, dt.count(),
+                dt.count() * 1e9 / (double(kLen) * kReps), total);
+}
+```
+
+**Counters.** Level 2 on `./dot 1` (real output, trimmed):
+
+```text
+$ sudo taskset -c 16 perf stat -M PipelineL2 -- ./dot 1
+1 accumulator(s): 0.859 s, 0.419 ns per element (total 2.048001e+09)
+
+         2,196,539      ex_ret_brn_misp                  #      0.2 %ops  bad_speculation_from_mispredicts
+                                                         #      0.0 %ops  bad_speculation_from_pipeline_restarts  (24.94%)
+         8,025,659      ex_no_retire.load_not_complete   #     67.2 %slots  backend_bound_by_cpu
+                                                         #      4.1 %slots  backend_bound_by_memory  (25.03%)
+    22,184,724,798      de_no_dispatch_per_slot.backend_stalls                                        (25.03%)
+       139,243,286      ex_no_retire.not_complete                                               (25.03%)
+         1,621,888      ex_ret_ucode_ops                 #     26.5 %slots  retiring_from_fastpath
+                                                         #      0.0 %slots  retiring_from_microcode  (25.04%)
+       617,214,865      de_no_dispatch_per_slot.no_ops_from_frontend #      0.2 %slots  frontend_bound_by_bandwidth  (25.00%)
+        68,655,884      cpu/de_no_dispatch_per_slot.no_ops_from_frontend,cmask=0x8/ #      1.8 %slots  frontend_bound_by_latency  (25.00%)
+```
+
+**Diagnosis.** IPC is 2.39, which the rule of thumb in Section 8.4 would call "executing efficiently". Top-down disagrees: on an 8-wide machine, 71% of the slots are Backend Bound, and almost all of that is **Core Bound**. The oldest op is waiting to execute, not waiting for a load. `perf annotate` (or `objdump -d`) shows why. GCC vectorized the multiplies, but without `-ffast-math` it must keep the additions in source order, so every `addsd` depends on the previous one:
+
+```text
+  movupd (%rdi,%rax,1),%xmm1
+  movupd (%rsi,%rax,1),%xmm3
+  add    $0x10,%rax
+  mulpd  %xmm3,%xmm1          # 2 products at once, independent
+  addsd  %xmm1,%xmm0          # s += p0   <- waits for the previous addsd
+  unpckhpd %xmm1,%xmm1
+  addsd  %xmm1,%xmm0          # s += p1   <- waits for the addsd above
+  cmp    $0x2000,%rax
+  jne    ...
+```
+
+`addsd` has a latency of 2 cycles on Zen 5 and a throughput of 2 per cycle (AMD's Zen 5 instruction latency table, shipped with SOG 58455). A chain of one add per element therefore costs 2 cycles per element. Measured: 3.88 G cycles / 2.048 G elements = 1.90 cycles per element. It comes in slightly under 2 because the out-of-order window (up to 448 macro-ops, 224 per thread in SMT mode, SOG section 2.10.3) lets the next call's chain start before the previous one finishes. The adder can do 4 adds in those 2 cycles and does 1.
+
+**Fix.** Break the chain with independent accumulators. With 8 scalar sums, GCC packs them into 4 `addpd` chains of 2 lanes each. (This changes the rounding order, as `-ffast-math` would, which is why the compiler will not do it for you at `-O2`.)
+
+**Re-measure** (medians of 3 runs):
+
+| | `dot 1` | `dot 8` |
+|---|---|---|
+| Time, ns per element | 0.856 s, 0.418 | 0.227 s, 0.111 |
+| Cycles per element | 1.90 | 0.50 |
+| IPC | 2.39 | 5.05 |
+| Retiring | 26.6% | 59.9% |
+| Frontend Bound | 1.9% | 0.1% |
+| Bad Speculation | 0.2% | 0.0% |
+| Backend Bound | 71.4% | 39.8% |
+| Core Bound | 68.1% | 29.0% |
+| Memory Bound | 3.3% | 10.7% |
+
+3.8x faster, and this time the profile moved: Retiring more than doubled. The new limit is 0.50 cycles per element. Each 8-element iteration issues 8 loads of 16 bytes, and Zen 5 executes at most two 128-, 256- or 512-bit loads per cycle (SOG 58455, section 2.12), so 8 / 2 = 4 cycles per 8 elements = 0.5. That is also why Memory Bound rose although everything hits L1. AMD's split asks "is the oldest op waiting for load data?", and an L1 hit still takes 7 cycles for an FP load. The next lever is wider loads. `-O3 -march=native -ffast-math` lets GCC reassociate and use 512-bit vectors: 0.057 ns per element (about 0.26 cycles per element), another 2x. Its single `zmm` accumulator is again a 2-cycle add chain, and `PipelineL2` duly reports Core Bound at 62-64%. The bottleneck moves with each fix, which is why you re-run level 1 after every change.
+
+#### What the Numbers Decide
+
+| Largest bucket | Next measurement | Typical fixes |
+|---|---|---|
+| Retiring high (over 50-60%) | Instruction count, vectorization report (`-fopt-info-vec`) | Do less work: better algorithm, SIMD, avoid recomputation |
+| Backend, Memory | `perf mem` / IBS / PEBS load latency, `perf c2c`, `dTLB-load-misses` | Locality, blocking, more misses in flight, huge pages, fix false sharing |
+| Backend, Core | `perf annotate` for long dependency chains, divides, port pressure | Multiple accumulators, cheaper instructions, unrolling |
+| Bad Speculation | `perf record -b`, `branch-misses` by source line ([Section 9.1](#91-perf-record)) | Branchless code, sorting or partitioning, profile-guided layout |
+| Frontend Bound | i-cache and i-TLB misses, code size | PGO, BOLT, hot/cold splitting, less inlining in cold code |
+
+#### Intel: `perf stat --topdown` and toplev (Illustrative, Not Measured Here)
+
+On Intel, `perf stat --topdown` uses the `TopdownL1` metric group, and on Ice Lake and later it reads the fixed `SLOTS` counter and `PERF_METRICS`. Example from the kernel's [topdown.txt](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/topdown.txt):
+
+```text
+% perf stat -a --topdown -I1000
+#           time      %  tma_retiring %  tma_backend_bound %  tma_frontend_bound %  tma_bad_speculation
+     1.001141351                 11.5                 34.9                  46.9                    6.7
+     2.006141972                 13.4                 28.1                  50.4                    8.1
+```
+
+`toplev` from Andi Kleen's [pmu-tools](https://github.com/andikleen/pmu-tools) implements the full Intel TMA tree, including the levels below 2, downloads the event list for your CPU model on first run (cached in `~/.cache/pmu-events`), and prints only the nodes above threshold. Example from the [toplev manual](https://github.com/andikleen/pmu-tools/wiki/toplev-manual):
+
+```text
+% toplev.py -l3 --single-thread ./c1-unoptimized numbers
+BE      Backend_Bound:                          60.42%
+BE/Mem  Backend_Bound.Memory_Bound:             32.23%
+BE/Mem  Backend_Bound.Memory_Bound.L1_Bound:    32.44%
+BE/Core Backend_Bound.Core_Bound:               45.93%
+```
+
+Use `toplev.py -l2 --single-thread ./app` for levels 1 and 2, `--nodes` to pick subtrees, and `-v` to show nodes below threshold. VTune's Microarchitecture Exploration analysis presents the same tree in a GUI.
+
+**AMD uProf** has the equivalent "pipeline utilization" view, supported on Zen 4 and later. It reports the same level 1 and level 2 metrics per core or system-wide, for example `sudo AMDuProfPcm -m pipeline_util -c core=0 -O /tmp/ -- /usr/bin/taskset -c 0 ./app` ([uProf Quick Reference Guide](https://docs.amd.com/api/khub/documents/nveV2jevKcum4LePBqpt3w/content)). It is not installed on this host, so the measurements above use perf's `PipelineL1`/`PipelineL2`, which are built on the same counters.
+
+### 8.6 Interview Questions
 
 **Q1.** `perf stat` shows `(50.00%)` next to some counters. What does it mean, and when is it a problem?
 
@@ -961,6 +1295,14 @@ Same work, more stall cycles. Check memory first: `perf stat -d` for L1 and LLC 
 
 The hypervisor does not expose a virtual PMU to the guest (or exposes a limited one). Software events (`task-clock`, `page-faults`) still work, and `perf record` falls back to `cpu-clock` (timer-based) sampling. On cloud instances, PMU access depends on the instance type: bare-metal or larger instances often expose it.
 
+**Q4.** You interleaved independent pointer chases and the program got 7x faster, but top-down still reports 99% Backend Bound, Memory. Did the fix work? What does the breakdown tell you now?
+
+It worked: judge a fix by wall time or cycles, never by the shares. Top-down percentages are fractions of the slots that were spent, so a program that is still waiting on DRAM in nearly every cycle stays at 99% Memory Bound even when it waits on 8 misses at once instead of 1. The profile tells you the bottleneck class did not change. You removed serialization, not the memory latency, so the next fixes are still on the memory side: more misses in flight (up to the core's miss-tracking limit, 124 on Zen 5), huge pages if IBS or PEBS shows TLB misses, or a layout that turns pointer chasing into sequential access. The breakdown only shifts when you remove the memory problem, as in the dot-product example, where Retiring went from 27% to 60% once the add chain was broken.
+
+**Q5.** How do Intel's TMA metrics and AMD's pipeline-utilization metrics differ? Can you compare a top-down profile across the two vendors?
+
+Same idea, different measurement points. Intel classifies issue (allocation) slots, on recent cores from a dedicated `SLOTS` counter plus `PERF_METRICS`, and Backend Bound is the remainder. AMD Zen 4 and Zen 5 classify dispatch slots (8 per cycle on Zen 5), measure Backend Bound directly with `de_no_dispatch_per_slot.backend_stalls`, and add an SMT-contention bucket. The level-2 Memory/Core split also differs. Intel uses execution-stall cycles with loads outstanding. AMD asks whether the oldest op in the retire queue is waiting for load data, so L1-hit latency on a long dependency chain can show up as "memory". Intel also has deeper levels (L1/L2/L3/DRAM Bound, ports), while AMD's level 3 is IBS sampling. Comparing the level-1 shape across vendors is reasonable ("memory bound on both"). Comparing exact percentages is not, because both the slot width and the definitions differ. Compare time and cycles for the same work instead.
+
 ---
 
 ## 9. Sampling Profiles: perf record, report, top, and annotate
@@ -973,7 +1315,8 @@ perf record -F 99 -g -p PID -- sleep 30         # attach to a running process fo
 perf record -F 99 -a -g -- sleep 30             # whole system, all CPUs
 perf record --call-graph dwarf ./app            # unwind with DWARF (no frame pointers needed)
 perf record --call-graph dwarf,16384 ./app      # copy 16 KB of stack per sample instead of 8 KB
-perf record --call-graph lbr ./app              # Intel Last Branch Record call stacks
+perf record --call-graph lbr ./app              # Intel Last Branch Record call stacks (Intel only)
+perf record -b ./app                            # branch stacks: last N taken branches per sample
 perf record -e cycles:pp -g ./app               # precise sampling (PEBS on Intel, IBS on AMD)
 perf record -e sched:sched_switch -a -g -- sleep 10   # sample a tracepoint, e.g. context switches
 perf record -o run1.data ./app                  # output file (default perf.data)
@@ -983,6 +1326,102 @@ perf record -o run1.data ./app                  # output file (default perf.data
 - **How many samples are enough?** Sample counts behave roughly like a binomial. At 99 Hz for 30 s on one busy CPU you get about 2,970 samples. A function at 1% gets about 30 samples, so its estimate has a relative standard error of about `sqrt(30)/30`, roughly 18%. To compare two versions of a 1% function, you need far more samples: profile longer, sample faster, or use counting instead.
 - **`-g` vs `--call-graph dwarf`.** `-g` uses frame pointers (cheap, small files, breaks without `-fno-omit-frame-pointer`). `dwarf` copies 8 KB of user stack per sample and unwinds offline (works on any binary with `.eh_frame`, but `perf.data` grows by hundreds of MB per minute and deep stacks are truncated).
 - **Skid.** When the counter overflows, the interrupt arrives a few instructions later, so the sample IP lands **after** the expensive instruction. Precise modifiers (`:p`, `:pp`) use hardware assistance (Intel PEBS, AMD IBS) to record the exact instruction. On AMD, `cycles:p` is forwarded to the `ibs_op` PMU automatically.
+
+#### How Precise Sampling Works: PEBS and IBS
+
+Plain sampling takes the IP from the interrupted register state when the overflow interrupt lands, which is some instructions after the event (skid). It also cannot say anything about the instruction beyond "the CPU was here". The two vendors fixed this in different ways.
+
+- **Intel PEBS (Precise Event-Based Sampling)** is **event-driven, with a hardware buffer**. When a PEBS-enabled counter overflows, the CPU itself writes a record, with no interrupt, for the next instruction that causes the event: the IP, general registers, a timestamp, and for memory events the data address, the data source and the load latency. The record goes into a buffer in memory that the kernel registers through the Debug Store (DS) area. The kernel takes an interrupt only when the buffer crosses a threshold. When a sample needs nothing that the kernel must add per sample, perf uses "large PEBS" and drains many records per interrupt, which makes high sample rates cheap. Older PEBS records the IP of the instruction **after** the one that caused the event (off by one). Haswell and later also store the "eventing IP", and perf uses it for `:pp` ([kernel source, `arch/x86/events/intel/ds.c`](https://github.com/torvalds/linux/blob/master/arch/x86/events/intel/ds.c)). `perf mem` and `perf c2c` on Intel use the PEBS load-latency events.
+- **AMD IBS (Instruction-Based Sampling)** is **op-driven, with tagging**. A counter counts cycles or dispatched ops. When it expires, the core **tags** the next op and follows that one op through the pipeline. When the op retires, IBS raises an interrupt with everything it saw: the exact IP (no skid), whether it was a load or store, the data cache and TLB levels it hit, the page size, the data source (L1, L2, L3, another core's cache, local or remote DRAM), the miss latency in cycles, the linear and physical data addresses, tag-to-retire cycles, and branch outcome for branches ([`man perf-amd-ibs`](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/perf-amd-ibs.txt)). There is one sample per interrupt and no buffer. IBS Fetch does the same for instruction fetches (i-cache, i-TLB, fetch latency).
+
+The practical difference: PEBS samples **the event you chose** (every Nth L3 miss, say), so its histogram shows where that event happens. IBS samples **ops**, whatever they turn out to do, so it is an unbiased sample of the instruction stream, and you filter afterwards ("of the sampled loads, which went to DRAM?"). On a load-heavy workload most IBS samples are uninteresting L1 hits. Zen 4 added an L3-miss-only filter (`ibs_op/l3missonly=1/`), and Zen 5 added a load-latency threshold (`ibs_op/ldlat=128/`, 128 to 2048 cycles, used by `perf mem record --ldlat`). This host advertises both in `/sys/bus/event_source/devices/ibs_op/caps/` (`zen4_ibs_extensions`, `ldlat`).
+
+What either one adds over plain cycle sampling: the exact instruction (no skid), **data addresses** (so you can group by data structure or cache line: `perf mem`, `perf c2c`), **where the data came from**, and **how long it took**. Cycle sampling tells you a load is hot. IBS or PEBS tells you it is hot because 90% of its executions miss to DRAM at about 480 cycles. [Section 9.6](#96-other-perf-subcommands-worth-knowing) shows a measured `perf mem` run.
+
+The `:p` levels from `man perf-list`: 0 means arbitrary skid, 1 constant skid, 2 "requested" zero skid, 3 must have zero skid. Intel PEBS supports levels up to 2 (3 in special cases). AMD's core PMU is inherently imprecise and IBS is inherently precise, so `cycles:p` (event 0x76) and `r0C1:p` (retired ops) are redirected to `ibs_op` and all levels behave the same.
+
+#### Branch Stacks: `perf record -b` and LBR
+
+A branch stack records the last N taken branches (from, to, mispredicted or not) with every sample. Intel calls the hardware the Last Branch Record (LBR, 32 entries on recent cores, with cycle counts per branch). AMD Zen 4 added LbrExtV2. On this Zen 5 host, `/proc/cpuinfo` shows `amd_lbr_v2` and `/sys/bus/event_source/devices/cpu/caps/branches` reads `16`, and `perf record -b` works. Measured with a filter loop whose `if` depends on random data:
+
+```cpp
+// branchy.cpp -- g++ -std=c++20 -O2 -g -Wall -Wextra -o branchy branchy.cpp
+// ./branchy          random data: the "if" is a coin flip
+// ./branchy sorted   the same data sorted: the branch becomes predictable
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <random>
+#include <vector>
+
+__attribute__((noipa)) int filter_big(const int* in, int n, int* out) {
+    int k = 0;
+    for (int i = 0; i < n; ++i)
+        if (in[i] >= 128) out[k++] = in[i];    // data-dependent branch around a store
+    return k;
+}
+
+int main(int argc, char** argv) {
+    constexpr int kN = 1 << 16;
+    std::vector<int> in(kN), out(kN);
+    std::mt19937 rng(1);
+    for (int& x : in) x = static_cast<int>(rng() % 256);
+    if (argc > 1 && std::strcmp(argv[1], "sorted") == 0) std::sort(in.begin(), in.end());
+
+    long total = 0;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int r = 0; r < 20'000; ++r) total += filter_big(in.data(), kN, out.data());
+    std::chrono::duration<double> dt = std::chrono::steady_clock::now() - t0;
+    std::printf("%.3f s (kept %ld)\n", dt.count(), total);
+}
+```
+
+```text
+$ sudo taskset -c 16 perf record -b -o br.data -- ./branchy
+$ sudo perf report -i br.data --stdio --sort srcline_from,srcline_to,mispredict --percent-limit 1
+# Samples: 13K of event 'cpu/cycles/P'
+# Overhead  From Source:Line                  To Source:Line                    Branch Mispredicted
+    66.68%  branchy.cpp:13                    branchy.cpp:14                    N
+    18.29%  branchy.cpp:14                    branchy.cpp:13                    N
+    14.92%  branchy.cpp:14                    branchy.cpp:13                    Y
+```
+
+The taken branch from the `if` on line 14 back to the loop on line 13 is mispredicted in 45% of its recorded executions (14.92 of 33.21). The loop's back edge (13 to 14) never is. `perf stat -e branches,branch-misses` agrees: 4.4e8 misses on random data against 3.3e5 once the input is sorted, and 3.3 s against 0.4 s (medians of 3). `perf report --branch-history` (record with `-b -g`) adds the branch path to each call chain, with a predicted percentage per edge.
+
+What this host cannot do, and why:
+
+- The `Cycles` and `IPC` columns of `perf report` stay at 0. AMD's LBR entries carry only from, to, mispredict and speculation bits ([kernel source, `arch/x86/events/amd/lbr.c`](https://github.com/torvalds/linux/blob/master/arch/x86/events/amd/lbr.c)). Intel LBR adds a cycle count per entry, which gives per-basic-block IPC and timed LBR traces.
+- `perf record --call-graph lbr` fails with `PMU Hardware or event type doesn't support branch stack sampling`, because LBR call-stack mode is Intel only (`PERF_SAMPLE_BRANCH_CALL_STACK` is marked unsupported in the AMD driver). On AMD, use frame pointers or `--call-graph dwarf`.
+
+Branch stacks are also the input that AutoFDO and BOLT prefer (`perf record -b`, then `create_llvm_prof` or `perf2bolt`), so the 16-entry stack on Zen 4 and Zen 5 can feed that workflow too.
+
+#### `cycles` vs `ref-cycles`
+
+`cycles` counts core clock cycles at whatever frequency the core runs, and stops while the core is halted (idle). `ref-cycles` counts unhalted cycles at a **fixed** reference rate. On Intel that is the TSC rate (`CPU_CLK_UNHALTED.REF_TSC`). On this Zen 5 host perf maps `ref-cycles` to `ls_not_halted_p0_cyc.p0_freq_cyc`, unhalted cycles at the P0 (base) frequency (`perf stat -vv -e ref-cycles` shows the mapping). Measured on `./dot 1`, pinned:
+
+```text
+$ sudo taskset -c 16 perf stat -e cycles,ref-cycles,instructions,msr/aperf/,msr/mperf/,msr/tsc/ -- ./dot 1
+     3,881,978,810      cycles
+     2,221,028,602      ref-cycles
+     9,272,995,464      instructions
+     3,882,012,745      msr/aperf/
+     2,221,047,868      msr/mperf/
+     2,221,047,738      msr/tsc/
+       0.852817455 seconds time elapsed
+```
+
+`ref-cycles / time` = 2.221e9 / 0.853 s = 2.60 GHz, the EPYC 9655's 2.6 GHz base clock ([AMD product page](https://www.amd.com/en/products/processors/server/epyc/9005-series/amd-epyc-9655.html): base 2.6 GHz, boost up to 4.5 GHz, all-core boost 4.1 GHz). `cycles / ref-cycles` = 1.75, so the core averaged 2.6 x 1.75 = 4.55 GHz, the single-core boost. The `APERF`/`MPERF` MSRs that the kernel uses for frequency accounting give the same two numbers. Use the ratio to **record the frequency** a benchmark actually ran at. Use `ref-cycles` (or wall time) to measure **elapsed busy time** independent of turbo, and `cycles` to measure work in core clocks (see the caveat for memory-bound code in [Section 8.4](#84-perf-stat)).
+
+#### Hybrid CPUs: `cpu_core` and `cpu_atom`
+
+On Intel hybrid parts (Alder Lake and later client chips), P-cores and E-cores have different PMUs with different event lists, so the kernel exports two CPU PMUs, `/sys/bus/event_source/devices/cpu_core` and `cpu_atom`, each with a `cpus` file listing which logical CPUs it covers ([kernel doc: intel-hybrid.txt](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/intel-hybrid.txt)). Consequences:
+
+- A generic event such as `cycles` becomes **two** events: `perf stat -e cycles` prints `cpu_core/cycles/` and `cpu_atom/cycles/`, and a thread that migrates is counted partly in each, with the running-time percentages showing the split.
+- Select one PMU explicitly: `perf stat -e cpu_core/cycles/` or `-e '{cpu_core/cycles/,cpu_core/instructions/}'`. A group that mixes `cpu_core` and `cpu_atom` events is rejected (perf warns and disables grouping), because a group must be schedulable on one PMU.
+- Model-specific events and metric groups (including TMA) differ per core type. Pin the benchmark (`taskset`) to one core type, or results and IPC are a blend of two microarchitectures.
+
+This host is not hybrid: it has one `cpu` PMU. AMD's compact Zen 5c cores implement the same microarchitecture as Zen 5, so AMD parts that mix the two do not need this split.
 
 ### 9.2 `perf report`
 

@@ -1,8 +1,8 @@
 # GPU Kernel Case Studies -- Comprehensive Optimization Ladders in HIP
 
-> Last reviewed: 2026-11 · Versions assumed: HIP/ROCm 7.0+ (ROCm 6.2-6.4 need two `-D` flags, see the build note in 0.2; code compile-checked with `hipcc --offload-arch=gfx942` from a ROCm 10.1 nightly; numbers measured on MI355X / gfx950), rocprofv3 and rocprof-compute 3.x, hipCUB/rocPRIM, rocWMMA, hipBLAS. CUDA 12.x equivalents are noted inline.
+> Last reviewed: 2026-11 · Versions assumed: HIP/ROCm 7.0+ (ROCm 6.2-6.4 need two `-D` flags, see the build note in 0.2; code compile-checked with `hipcc --offload-arch=gfx942` from a ROCm 10.1 nightly; numbers measured on MI350X / gfx950), rocprofv3 (rocprofiler-sdk 1.3.5) and rocprof-compute 3.9.0, hipCUB/rocPRIM, rocWMMA, hipBLAS. CUDA 12.x equivalents are noted inline.
 
-> Version note: ROCm 10.0.0 (Aug 2026) and 10.1.0 are public releases of the ROCm Core SDK, built with TheRock since 7.14. This line succeeded the 7.x releases (the 7.0-7.2 production stream and the 7.9-7.14 technology previews). The "ROCm 10.1 nightly" used for the measurements here is a pre-release build of 10.1.0 (`10.1.0a20260825`), not the published 10.1.0 package. Other files in this repo state their own assumed versions (often ROCm 6.4-7.x) in their header lines, so check those headers when a flag or tool name differs.
+> Version note: ROCm 10.0.0 (Aug 2026) and 10.1.0 are public releases of the ROCm Core SDK, built with TheRock since 7.14. This line succeeded the 7.x releases (the 7.0-7.2 production stream and the 7.9-7.14 technology previews). The "ROCm 10.1 nightly" used for the measurements here is a pre-release build of 10.1.0 (`10.1.0a20260825`), not the published 10.1.0 package. Other files in this repo state their own assumed versions (some still say ROCm 6.4-7.x) in their header lines, so check those headers when a flag or tool name differs.
 
 > Eight canonical "optimize this kernel" case studies, each built as a ladder: a naive kernel, then one change at a time, with the reason each step helps stated in counter terms (coalescing, LDS bank conflicts, occupancy, VALU utilization), the arithmetic intensity, and the bandwidth or FLOP rate actually measured. All code is HIP and is written for **64-lane wavefronts** (AMD CDNA). Every place where wave64 and NVIDIA's warp32 differ is called out. Section 8 is a graded exercise list with hints in [Answers](#answers). Companion files: [AMD GPU Architecture and Profiling](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md) (hardware, counters, top-down method), [Performance Engineering -- Roofline Model](../computer-science/Performance_Engineering.md#3-roofline-model) (arithmetic intensity, ridge points), and [Parallel and GPU Programming](../ml-gpu/Parallel_GPU_Programming.md) (HIP/CUDA basics).
 
@@ -27,7 +27,7 @@
 
 ## 0.1 How to Read the Numbers
 
-Every case study reports numbers **measured on one MI355X (gfx950, CDNA4)** with a ROCm 10.1 nightly. The same sources were compile-checked for MI300X (`--offload-arch=gfx942`, CDNA3). Treat the absolute numbers as one data point. What carries over to other GPUs, and what you should quote in an interview, is:
+Every case study reports numbers **measured on one MI350X (gfx950, CDNA4, 2.2 GHz peak engine clock)** with a ROCm 10.1 nightly. The MI355X is the same gfx950 chip at 2.4 GHz and a higher power limit, so its peaks are about 9% higher; the "% of peak" figures below use MI350X peaks. The same sources were compile-checked for MI300X (`--offload-arch=gfx942`, CDNA3). Treat the absolute numbers as one data point. What carries over to other GPUs, and what you should quote in an interview, is:
 
 - the **ranking** of the variants and the **ratio** between rungs;
 - the **fraction of the achievable ceiling** (a copy or read kernel on the same machine), not of the data-sheet peak;
@@ -58,21 +58,23 @@ The classic CUDA reduction tail `if (tid < 32) { volatile float* s = ...; s[tid]
 
 ## 0.3 Hardware Numbers Used in This File
 
-| | MI300X (gfx942, CDNA3) | MI355X (gfx950, CDNA4) |
-|---|---|---|
-| CUs (XCDs x CUs) | 304 (8 x 38) | 256 (8 x 32) |
-| Peak engine clock | 2.1 GHz | 2.4 GHz |
-| HBM | 192 GB HBM3, **5.3 TB/s** | 288 GB HBM3E, **8.0 TB/s** |
-| Infinity Cache (MALL) | 256 MB | 256 MB |
-| L2 | 4 MB per XCD (not coherent across XCDs) | 4 MB per XCD |
-| LDS per CU | 64 KB, **32 banks** x 4 B | 160 KB, **64 banks** x 4 B |
-| Max waves per SIMD (4 SIMDs per CU) | 8 | 8 |
-| FP32 vector peak | 163.4 TFLOP/s (with packed `v_pk_fma_f32`; 81.7 without) | 157.3 TFLOP/s |
-| FP16/BF16 matrix peak (dense) | 1307.4 TFLOP/s | ~2.5 PFLOP/s |
-| Ridge point, FP32 vector | 163.4 / 5.3 = **30.8 FLOP/B** | 157.3 / 8.0 = **19.7 FLOP/B** |
-| Ridge point, FP16 matrix | **247 FLOP/B** | **~315 FLOP/B** |
+| | MI300X (gfx942, CDNA3) | MI350X (gfx950, CDNA4; measured here) | MI355X (gfx950, CDNA4) |
+|---|---|---|---|
+| CUs (XCDs x CUs) | 304 (8 x 38) | 256 (8 x 32) | 256 (8 x 32) |
+| Peak engine clock | 2.1 GHz | 2.2 GHz | 2.4 GHz |
+| HBM | 192 GB HBM3, **5.3 TB/s** | 288 GB HBM3E, **8.0 TB/s** | 288 GB HBM3E, **8.0 TB/s** |
+| Infinity Cache (MALL) | 256 MB | 256 MB | 256 MB |
+| L2 | 4 MB per XCD (not coherent across XCDs) | 4 MB per XCD | 4 MB per XCD |
+| LDS per CU | 64 KB, **32 banks** x 4 B | 160 KB, **64 banks** x 4 B | 160 KB, **64 banks** x 4 B |
+| Max waves per SIMD (4 SIMDs per CU) | 8 | 8 | 8 |
+| FP32 vector peak (packed `v_pk_fma_f32`; non-packed is half) | 163.4 TFLOP/s (81.7 without packing) | 144.2 TFLOP/s (72.1) | 157.3 TFLOP/s (78.6) |
+| FP16/BF16 matrix peak (dense) | 1307.4 TFLOP/s | ~2.3 PFLOP/s | ~2.5 PFLOP/s |
+| Ridge point, FP32 vector | 163.4 / 5.3 = **30.8 FLOP/B** | 144.2 / 8.0 = **18.0 FLOP/B** | 157.3 / 8.0 = **19.7 FLOP/B** |
+| Ridge point, FP16 matrix | **247 FLOP/B** | **~288 FLOP/B** | **~315 FLOP/B** |
 
-**Measured ceilings on our MI355X** (simple `float4` grid-stride kernels, 1 GiB buffers): read-only **5.3-5.6 TB/s**, copy (read + write) **4.0-4.7 TB/s**, `hipMemcpy` device-to-device 4.7 TB/s. That is 50-70% of the 8 TB/s data-sheet number. Every "% of ceiling" below is relative to these measured values.
+Peaks are from AMD's product pages ([MI300X](https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html), [MI350X](https://www.amd.com/en/products/accelerators/instinct/mi350/mi350x.html), [MI355X](https://www.amd.com/en/products/accelerators/instinct/mi350/mi355x.html)); LDS and bank counts are from the [CDNA3](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf) and [CDNA4](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf) ISA guides. AMD's CDNA3/CDNA4 "FP32 vector" figure already counts packed FP32 (256 FLOP/clk/CU: 144.2 = 256 CUs x 2.2 GHz x 256).
+
+**Measured ceilings on our MI350X** (simple `float4` grid-stride kernels, 1 GiB buffers): read-only **5.3-5.6 TB/s**, copy (read + write) **4.0-4.7 TB/s**, `hipMemcpy` device-to-device 4.7 TB/s. That is 50-70% of the 8 TB/s data-sheet number. Every "% of ceiling" below is relative to these measured values.
 
 **Occupancy rule of thumb (CDNA3/CDNA4):** waves per SIMD = `min(8, floor(512 / VGPRs allocated))`, with VGPRs allocated in granules of 8. So 96 VGPRs gives 5 waves, 104 gives 4, and 240 gives 2. LDS also limits it: `floor(LDS per CU / LDS per block)` blocks per CU. Do not compute this by hand in practice. Ask the compiler:
 
@@ -168,7 +170,7 @@ Methodology rules that the numbers below follow (and that interviewers probe):
 | rocprof-compute 16.1.3 vL1D Coalescing | How well lanes' addresses merge into cache lines | Transpose, softmax |
 | rocprof-compute 17.1.5 HBM Bandwidth | Achieved DRAM bandwidth | All memory-bound kernels |
 
-Metric IDs are from rocprof-compute 3.9 for gfx942. They move between releases, so check with `rocprof-compute analyze --list-metrics gfx942`. The commands:
+Metric IDs are from rocprof-compute 3.9 for gfx942. They move between releases, so check with `rocprof-compute analyze --list-metrics gfx942` (any supported arch), or `rocprof-compute profile --list-available-metrics` for the GPU in the machine. Both flags exist in 3.9.0. The commands:
 
 ```bash
 # Per-kernel timing and statistics
@@ -191,7 +193,7 @@ Newer rocprofv3 builds default to the rocpd (SQLite) format and warn that direct
 
 ## 1.1 Problem and Roofline Position
 
-Sum `n = 2^28` floats (1 GiB). Each element is read once and takes part in one add: **AI = 1 FLOP / 4 B = 0.25 FLOP/B**, 80-120x below the FP32 ridge point (19.7-30.8 FLOP/B). The kernel is memory-bound on every GPU ever built. The **target is the read-bandwidth ceiling** (5.3-5.6 TB/s on our MI355X, which works out to about 0.19-0.20 ms). Every rung of the ladder removes overhead that keeps the kernel from streaming at that rate.
+Sum `n = 2^28` floats (1 GiB). Each element is read once and takes part in one add: **AI = 1 FLOP / 4 B = 0.25 FLOP/B**, 72-123x below the FP32 ridge point (18.0-30.8 FLOP/B). The kernel is memory-bound on every GPU ever built. The **target is the read-bandwidth ceiling** (5.3-5.6 TB/s on our MI350X, which works out to about 0.19-0.20 ms). Every rung of the ladder removes overhead that keeps the kernel from streaming at that rate.
 
 The ladder follows Mark Harris's classic CUDA reduction talk, adapted to wave64. Each rung changes exactly one thing.
 
@@ -485,7 +487,7 @@ int main() {
 }
 ```
 
-Measured on MI355X (1 GiB of FP32; read ceiling 5.3-5.6 TB/s):
+Measured on MI350X (1 GiB of FP32; read ceiling 5.3-5.6 TB/s):
 
 | Rung | Time (ms) | GB/s | % of read ceiling | What changed (counter evidence) |
 |---|---|---|---|---|
@@ -522,7 +524,7 @@ Enough to fill every CU at full occupancy and no more: here `CUs x 8` blocks of 
 
 Not necessarily. If partials are combined with `atomicAdd` on floats, the order of additions depends on block scheduling, and float addition is not associative. Fixes: two-pass or last-block with a fixed combine order (deterministic for a fixed grid size), accumulation in double or Kahan/pairwise summation to reduce the error, or integer/fixed-point accumulation for bit-exact results. Note that "deterministic" usually still changes if the grid size (that is, the GPU model) changes.
 
-**Q6.** In R6c, why are two `__threadfence()` calls needed, and why is that variant slower on MI300X/MI355X?
+**Q6.** In R6c, why are two `__threadfence()` calls needed, and why is that variant slower on MI300X/MI350X?
 
 The writer must make its partial visible before the counter increment can be observed (release). The last block must not read partials until after it has seen the final count (acquire). Without the fences, the last block can read stale partials from its L1/L2. On CDNA3/CDNA4 each XCD has its own L2, and those L2s are not coherent with one another. A device-scope fence must write back or invalidate cache contents so other XCDs can see the data, which costs far more than the same fence on a single-die GPU. The 2,048 fences cost about 70 us here.
 
@@ -643,7 +645,7 @@ Padding is not free. It wastes 1/65 of the LDS, and it breaks 16-byte alignment 
 
 ## 2.4 Results
 
-Measured on MI355X (8192 x 8192 FP32; bytes counted = read + write = 537 MB):
+Measured on MI350X (8192 x 8192 FP32; bytes counted = read + write = 537 MB):
 
 | Variant | Time (ms) | GB/s | % of copy | `TCP_TCC_WRITE_REQ_sum` | `SQ_LDS_BANK_CONFLICT` |
 |---|---|---|---|---|---|
@@ -944,7 +946,7 @@ The idea (Merrill and Garland, 2016) is to make the scan **one pass**, with traf
 3. It then **looks back** over its predecessors: it adds aggregates until it finds a predecessor that has published an **inclusive prefix** (flag P), then publishes its own inclusive prefix.
 4. The flag and value are packed into **one 64-bit word** written atomically, so a reader can never see a flag without its value. That is why relaxed atomics are enough here.
 
-The simple version above is **correct but slow** (0.66 TB/s). Its look-back is serial: one lane polls one predecessor at a time with device-scope atomic loads. On a multi-XCD GPU those loads cannot be served by the local L2, so each poll is a long round trip. Production implementations (CUB, rocPRIM) look back **a whole wave at a time** (64 predecessors per poll, combined with a ballot and a wave reduction), use bigger tiles (thousands of items) so there are fewer tiles, and tune per architecture. On our MI355X and nightly build, `hipcub::DeviceScan::InclusiveSum` ran at 2.3 TB/s-equivalent, *slower* than the 3-kernel reduce-then-scan (3.3 TB/s-equivalent). On multi-XCD parts the cross-XCD flag latency can outweigh the saved n of traffic. **Measure; do not assume single-pass wins.**
+The simple version above is **correct but slow** (0.66 TB/s). Its look-back is serial: one lane polls one predecessor at a time with device-scope atomic loads. On a multi-XCD GPU those loads cannot be served by the local L2, so each poll is a long round trip. Production implementations (CUB, rocPRIM) look back **a whole wave at a time** (64 predecessors per poll, combined with a ballot and a wave reduction), use bigger tiles (thousands of items) so there are fewer tiles, and tune per architecture. On our MI350X and nightly build, `hipcub::DeviceScan::InclusiveSum` ran at 2.3 TB/s-equivalent, *slower* than the 3-kernel reduce-then-scan (3.3 TB/s-equivalent). On multi-XCD parts the cross-XCD flag latency can outweigh the saved n of traffic. **Measure; do not assume single-pass wins.**
 
 ## 3.6 Driver and Results
 
@@ -1017,7 +1019,7 @@ int main() {
 }
 ```
 
-Measured on MI355X (`n = 2^28` int32; GB/s computed against 2n bytes):
+Measured on MI350X (`n = 2^28` int32; GB/s computed against 2n bytes):
 
 | Variant | Scope | Time (ms) | GB/s (2n) | Notes |
 |---|---|---|---|---|
@@ -1045,7 +1047,7 @@ Each tile publishes its local aggregate early, then walks backwards summing pred
 
 **Q4.** What is the minimum memory traffic for a scan, and how do the algorithms compare?
 
-The minimum is 2n (read and write once). Single-pass chained scan achieves it. Reduce-then-scan uses 3n (it reads the input twice). Scan-then-propagate (scan tiles and write them, scan the sums, then add the offsets in place) uses 4n. That makes single-pass 33-50% less traffic in theory. In practice, synchronization latency can eat that advantage, as the MI355X measurement shows.
+The minimum is 2n (read and write once). Single-pass chained scan achieves it. Reduce-then-scan uses 3n (it reads the input twice). Scan-then-propagate (scan tiles and write them, scan the sums, then add the offsets in place) uses 4n. That makes single-pass 33-50% less traffic in theory. In practice, synchronization latency can eat that advantage, as the MI350X measurement shows.
 
 **Q5.** Where do scans appear in real systems?
 
@@ -1198,7 +1200,7 @@ int main() {
 
 ## 4.3 Why Each Step Helps
 
-**H1: global atomics.** Every byte becomes one `global_atomic_add` to one of 256 addresses. On our MI355X this ran at **2.2 GB/s (uniform) and 0.09 GB/s (all equal)**, more than 1000x below the read ceiling. The counters show where the atomics went: on a smaller run, **`TCC_EA0_ATOMIC_sum` equalled `TCC_ATOMIC_sum`** (6.49M each) and the L2 hit count was close to zero. Every atomic that reached L2 was forwarded past it to the memory side, so each one paid a fabric round trip, and same-address atomics serialized there. That is consistent with how a multi-XCD GPU keeps device-wide atomics coherent across 8 separate L2s. On single-die GPUs, L2 atomics are much faster, but H1 is still the slowest variant there too. **Lesson: on MI300-class parts, high-rate global atomics to a few addresses are a disaster. Always privatize.**
+**H1: global atomics.** Every byte becomes one `global_atomic_add` to one of 256 addresses. On our MI350X this ran at **2.2 GB/s (uniform) and 0.09 GB/s (all equal)**, more than 1000x below the read ceiling. The counters show where the atomics went: on a smaller run, **`TCC_EA0_ATOMIC_sum` equalled `TCC_ATOMIC_sum`** (6.49M each) and the L2 hit count was close to zero. Every atomic that reached L2 was forwarded past it to the memory side, so each one paid a fabric round trip, and same-address atomics serialized there. That is consistent with how a multi-XCD GPU keeps device-wide atomics coherent across 8 separate L2s. On single-die GPUs, L2 atomics are much faster, but H1 is still the slowest variant there too. **Lesson: on MI300-class parts, high-rate global atomics to a few addresses are a disaster. Always privatize.**
 
 **H2: LDS privatization.** Each block keeps its own 256-bin histogram in LDS (`ds_add_u32`, executed inside the CU's LDS) and merges into global memory with at most 256 atomics per block at the end, which is 512K global atomics instead of 1G. Uniform data: **2.77 TB/s, about 50% of the read ceiling**. The remaining limit is LDS atomic throughput: 4 LDS atomics per 4-byte load, with random bins colliding on banks. Skewed data: **190-280 GB/s**. When all 64 lanes of a `ds_add_u32` target the *same address*, the LDS applies the 64 updates one after another.
 
@@ -1210,7 +1212,7 @@ int main() {
 
 ## 4.4 Results
 
-Measured on MI355X (1 GiB of bytes, 256 bins; read ceiling 5.3-5.6 TB/s):
+Measured on MI350X (1 GiB of bytes, 256 bins; read ceiling 5.3-5.6 TB/s):
 
 | Variant | Uniform: ms | Uniform: GB/s | All-equal: ms | All-equal: GB/s |
 |---|---|---|---|---|
@@ -1490,7 +1492,7 @@ int main() {
 
 ## 5.5 Results
 
-Measured on MI355X (32,768 x 4,096 FP32; bytes counted = read + write = 1.07 GB; copy ceiling 4.0-4.7 TB/s):
+Measured on MI350X (32,768 x 4,096 FP32; bytes counted = read + write = 1.07 GB; copy ceiling 4.0-4.7 TB/s):
 
 | Variant | Time (ms) | GB/s | VGPRs / waves per SIMD | Notes |
 |---|---|---|---|---|
@@ -1680,7 +1682,7 @@ Each of the 256 threads owns an **8 x 8 tile of C in 64 registers**. Per `k`, it
 
 Things the ISA shows (`--save-temps`, gfx942):
 
-- The compiler emits **`v_pk_fma_f32`** (packed FP32: 2 FMAs per instruction, 256 per BK slice). That is why G3/G4 exceed the "non-packed" FP32 peak (78.6 TFLOP/s on MI355X) and why AMD quotes 163.4 TFLOP/s FP32 vector for MI300X. G4 reaches **63% of the packed peak** on MI355X.
+- The compiler emits **`v_pk_fma_f32`** (packed FP32: 2 FMAs per instruction, 256 per BK slice). That is why G3/G4 exceed the "non-packed" FP32 peak (72.1 TFLOP/s on MI350X) and why AMD quotes 163.4 TFLOP/s FP32 vector for MI300X and 144.2 for MI350X. G4 reaches **68% of the packed peak** on MI350X.
 - G3 already had the same `SQ_INSTS_LDS` as G4: the compiler merged the scalar LDS reads into `ds_read_b128` by itself. G4's gain (6%) comes from the **global** `float4` loads (`global_load_dwordx4`).
 - `SQ_LDS_BANK_CONFLICT` is 151M cycles, about 2 per LDS instruction. Lanes `tc` and `tc + 8` read `Bs[k][tc*8..]`, 64 words apart, and land in the same banks on 64-bank gfx950 (on 32-bank CDNA3, lanes `tc` and `tc + 4` collide). Swizzling the LDS layout is the next fix (exercise E9).
 - The A-tile load (`a_row = t / 2`) reads only 32 contiguous bytes per row. Production kernels use BK = 16-64 so each row segment fills whole cache lines.
@@ -1743,7 +1745,7 @@ The idea: issue global loads for slice `k+1` into registers, compute slice `k` f
 
 The scheduler hoisted LDS reads to overlap them with the in-flight global loads, and register use more than doubled. That halved occupancy. Forcing occupancy back with `__attribute__((amdgpu_waves_per_eu(N)))` made it **spill to scratch**, which was 8-17x slower. Lessons interviewers like:
 
-1. **AMD hides latency primarily with occupancy** (up to 8 waves/SIMD and a large register file). Software pipelining that costs registers can be a net loss. Always check `-Rpass-analysis=kernel-resource-usage` and the "VGPRs Spill" line.
+1. **AMD hides latency with occupancy or with ILP, that is, enough bytes in flight per wave** (see [Latency Hiding Quantified](../ml-gpu/AMD_GPU_Architecture_and_Profiling.md#3-latency-hiding-quantified)). Either route works, but here the extra in-flight loads cost VGPRs, occupancy fell from 4 to 2 waves per SIMD, and the kernel lost more latency hiding than the pipelining gained. Software pipelining that costs registers can be a net loss. Always check `-Rpass-analysis=kernel-resource-usage` and the "VGPRs Spill" line.
 2. Production AMD kernels double-buffer without staging through VGPRs, using **direct-to-LDS loads** (`global_load_lds_*` / `buffer_load ... lds`; 32 bits per lane on CDNA3, up to 128 bits on CDNA4), plus explicit scheduling hints. Libraries (hipBLASLt, Composable Kernel) handle this.
 3. Never assume an optimization from a CUDA tutorial transfers. Measure it.
 
@@ -1814,7 +1816,7 @@ __global__ void gemm_rocwmma_naive(const rocwmma::float16_t* A, const rocwmma::f
 2. Each wave owns a large sub-tile (for example 64 x 128) and keeps **many accumulators** (AGPRs/VGPRs). Each A fragment loaded from LDS is reused across all N sub-tiles and each B fragment across all M sub-tiles. This is register blocking again, at fragment granularity.
 3. LDS reads for the next k-step are interleaved with the MFMAs of the current one (software pipelining). The epilogue (scale, bias, activation, type conversion) is fused before the store.
 
-`hipblasGemmEx` (FP16 in, FP32 accumulate) did the same 4096^3 problem in **0.14 ms = 980-995 TFLOP/s, about 40% of MI355X's dense FP16 peak** at this size. Larger and better-shaped problems get closer to the peak.
+`hipblasGemmEx` (FP16 in, FP32 accumulate) did the same 4096^3 problem in **0.14 ms = 980-995 TFLOP/s, about 43% of MI350X's dense FP16 peak (2.3 PFLOP/s)** at this size. Larger and better-shaped problems get closer to the peak.
 
 ## 6.6 G7 Split-K and Stream-K
 
@@ -1957,20 +1959,20 @@ int main() {
 }
 ```
 
-Measured on MI355X (`M = N = K = 4096`; FP32 vector ridge 19.7 FLOP/B, FP16 matrix ridge about 315 FLOP/B):
+Measured on MI350X (`M = N = K = 4096`; FP32 vector ridge 18.0 FLOP/B, FP16 matrix ridge about 288 FLOP/B; percentages are of MI350X peaks, 144.2 TFLOP/s packed FP32 and 2.3 PFLOP/s dense FP16):
 
 | Step | Time (ms) | TFLOP/s | % of relevant peak | Measured HBM AI (FLOP/B) | Roofline position / binding resource |
 |---|---|---|---|---|---|
-| G1 naive | 36.1 | 3.8 | 2.4% (FP32) | 5.6 | Left of ridge but far below the HBM roof: memory-instruction issue |
-| G2 LDS 32x32 | 5.11 | 26.9 | 17% | 32 | Right of ridge; LDS bandwidth |
-| G3 register 8x8 | 1.48 | 92.9 | 59% | 177 | Compute side; VALU issue, LDS conflicts |
-| G4 + `float4` | 1.39 | 98.7 | 63% | 176 | Compute side |
-| G5 + double buffer | 1.55 | 88.5 | 56% | 172 | Occupancy 4 to 2 (240 VGPRs) |
+| G1 naive | 36.1 | 3.8 | 2.6% (FP32) | 5.6 | Left of ridge but far below the HBM roof: memory-instruction issue |
+| G2 LDS 32x32 | 5.11 | 26.9 | 19% | 32 | Right of ridge; LDS bandwidth |
+| G3 register 8x8 | 1.48 | 92.9 | 64% | 177 | Compute side; VALU issue, LDS conflicts |
+| G4 + `float4` | 1.39 | 98.7 | 68% | 176 | Compute side |
+| G5 + double buffer | 1.55 | 88.5 | 61% | 172 | Occupancy 4 to 2 (240 VGPRs) |
 | G6a MFMA FP16, no LDS | 2.58 | 53 | 2% (FP16) | 80 | Far below roof: load issue |
 | G6b rocWMMA, no LDS | 2.58 | 53 | 2% | | Same instructions as G6a |
-| `hipblasSgemm` | 1.10 | 125 | 80% | | Library (FP32) |
-| `hipblasGemmEx` FP16 | 0.14 | 980-995 | ~40% | | Library (matrix cores) |
-| G7 split-K, 512x512x16384 | 0.22 | 38 | 24% | | 16x more parallelism than G4 (3.2) |
+| `hipblasSgemm` | 1.10 | 125 | 87% | | Library (FP32) |
+| `hipblasGemmEx` FP16 | 0.14 | 980-995 | ~43% | | Library (matrix cores) |
+| G7 split-K, 512x512x16384 | 0.22 | 38 | 26% | | 16x more parallelism than G4 (3.2) |
 
 ## 6.8 Interview Questions
 
@@ -2108,7 +2110,7 @@ int main() {
 
 ## 7.3 Results and What They Mean
 
-Measured on MI355X (`n = 2^27` floats, 512 MiB per array):
+Measured on MI350X (`n = 2^27` floats, 512 MiB per array):
 
 | Measurement | Result |
 |---|---|
@@ -2166,8 +2168,8 @@ At about 2 us of launch cost per call, the GPU spends about 0.2 s of each second
 
 Write each kernel in HIP, starting from `common.hpp` (Section 0.4). For every exercise, report four things: (1) the algorithmic bytes and FLOPs, (2) your achieved GB/s or TFLOP/s, (3) the result as a percentage of the **measured ceiling on your machine**, and (4) one counter that explains the remaining gap. Measure the two ceilings first with a `float4` grid-stride kernel on a 1 GiB buffer:
 
-- **R** = read-only ceiling (our MI355X: about 5.4 TB/s)
-- **C** = copy ceiling, read + write (our MI355X: about 4.4 TB/s)
+- **R** = read-only ceiling (our MI350X: about 5.4 TB/s)
+- **C** = copy ceiling, read + write (our MI350X: about 4.4 TB/s)
 
 On MI300X, measure your own R and C. Do not scale ours. Levels: 1 = warm-up, 2 = standard interview question, 3 = strong-candidate question, 4 = take-home or onsite deep dive. Hints are in [Answers](#answers). Try each exercise before reading them.
 
@@ -2230,7 +2232,7 @@ On MI300X, measure your own R and C. Do not scale ours. Levels: 1 = warm-up, 2 =
 
 **E8.** Forward: the Section 5 LN kernel. The two-pass variance from registers handles mean-1e4 data. With `E[x^2] - E[x]^2` you will see variance errors of order 1-10 on data whose true variance is 1, sometimes negative, giving NaN from `rsqrt`. If N does not fit in registers, use Welford per lane and merge lanes with the Chan formula via shuffles. Backward, with `xhat = (x - mean) * rstd` and `g = dy * gamma`: `dx = rstd * (g - mean(g) - xhat * mean(g * xhat))`. `dgamma = sum over rows of dy * xhat` and `dbeta = sum over rows of dy` are **column** reductions. Have each block accumulate partials for a slab of rows in registers or LDS, write `[blocks x N]` partials, then reduce them in a second kernel in a fixed order (deterministic, no float atomics).
 
-**E9.** Expect roughly the Section 6 numbers: naive 2-3% of peak, LDS tile 15-20%, register-blocked 55-65% of packed FP32 peak. To pass 50%: 128 x 128 block tile, 8 x 8 thread tile (64 accumulators), `As` transposed, `float4` global and LDS accesses, at most about 128 VGPRs (4 waves/SIMD), no spills, and `v_pk_fma_f32` in the ISA. Kill the remaining conflicts with an XOR swizzle on the `Bs` column index, and try BK = 16 for more work per barrier. Do not add double buffering without checking VGPRs. MFMA stretch: stage 128 x 128 x 32 tiles in LDS. Each wave computes a 64 x 64 sub-tile as a 4 x 4 grid of `16x16x16` MFMAs, loading 4 A fragments and 4 B fragments per k-step and reusing each 4 times. 30% of the FP16 peak needs conflict-free fragment reads, and `hipblasGemmEx` is the ceiling to compare against.
+**E9.** Expect roughly the Section 6 numbers: naive 2-3% of peak, LDS tile 15-20%, register-blocked 60-70% of packed FP32 peak. To pass 50%: 128 x 128 block tile, 8 x 8 thread tile (64 accumulators), `As` transposed, `float4` global and LDS accesses, at most about 128 VGPRs (4 waves/SIMD), no spills, and `v_pk_fma_f32` in the ISA. Kill the remaining conflicts with an XOR swizzle on the `Bs` column index, and try BK = 16 for more work per barrier. Do not add double buffering without checking VGPRs. MFMA stretch: stage 128 x 128 x 32 tiles in LDS. Each wave computes a 64 x 64 sub-tile as a 4 x 4 grid of `16x16x16` MFMAs, loading 4 A fragments and 4 B fragments per k-step and reusing each 4 times. 30% of the FP16 peak needs conflict-free fragment reads, and `hipblasGemmEx` is the ceiling to compare against.
 
 **E10.** For k <= 32: one wave per row. Each lane scans its 64 elements, keeping a sorted top-k list in registers with insertion that exits early when the value is below the current k-th. Then merge across lanes in k rounds: wave argmax via shuffles, the winning lane pops its head, repeat. Alternatively, write the 64 x k candidates to LDS and bitonic-sort them. This is read-bound for small k. For k = 64 and larger, use **radix select**: build a histogram of the top 8 bits of the order-preserving uint transform of the floats, find the bucket containing the k-th element, refine on the next 8 bits, then gather everything above the threshold and sort only those. This is how PyTorch's `topk` works. For global top-1000 of 10^8: per-block top-k, then a second pass over the `blocks x k` candidates. Handle ties with `(value desc, index asc)` and decide where NaN sorts.
 

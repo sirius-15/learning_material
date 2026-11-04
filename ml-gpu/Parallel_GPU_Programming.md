@@ -1,6 +1,6 @@
 # Parallel and GPU Programming -- Comprehensive Reference
 
-> Last reviewed: 2026-11 · Versions assumed: ROCm 6.4-7.x, CUDA 12.x, CMake 3.21-4.2, Open MPI 5.0
+> Last reviewed: 2026-11 · Versions assumed: ROCm 6.4-10.x and rocprof-compute 3.9-3.11 (version-specific behaviour is noted inline; host examples use an MI350X with a ROCm 10.1.0 nightly, rocprof-compute 3.9.0 and rocprofv3 / rocprofiler-sdk 1.3.5), CUDA 12.x, CMake 3.21-4.2, Open MPI 5.0
 
 > A deep-dive reference covering MPI, OpenMP, CUDA, and HIP programming for high-performance computing. Each section includes conceptual explanations, comparison tables, code examples, and common interview questions with detailed answers. Complements the *C++ Fundamentals*, *CS Fundamentals*, *DSA Fundamentals*, and *LeetCode Patterns* guides.
 
@@ -3690,7 +3690,7 @@ HIP's API is a near-1:1 mapping of CUDA. Most code changes are mechanical find-a
 | `__shared__` | `__shared__` | Identical |
 | `__constant__` | `__constant__` | Identical |
 | `atomicAdd` | `atomicAdd` | Identical |
-| `__shfl_down_sync` | `__shfl_down` | AMD uses wavefront-width shuffle |
+| `__shfl_down_sync` | `__shfl_down_sync` or `__shfl_down` | The `_sync` builtins are on by default since ROCm 7.0 and take a **64-bit** mask (ROCm 6.2-6.4: opt in with `-DHIP_ENABLE_WARP_SYNC_BUILTINS`). The mask-free `__shfl_down` works on every version, because a wavefront runs in lockstep ([HIP docs](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html)) |
 
 ## 25.3 AMD GPU Architecture
 
@@ -3710,8 +3710,8 @@ HIP's API is a near-1:1 mapping of CUDA. Most code changes are mechanical find-a
 | Family | Architecture | Target Market | Wavefront Size |
 |---|---|---|---|
 | GCN (1-5) | Graphics Core Next | Legacy GPUs | 64 |
-| CDNA | Compute DNA (MI100, MI200, MI300) | Data center / HPC | 64 |
-| RDNA (1-3) | Radeon DNA | Consumer / Gaming | 32 (native), 64 (wave64 mode) |
+| CDNA (1-4) | Compute DNA (MI100, MI200, MI300, MI350) | Data center / HPC | 64 |
+| RDNA (1-4) | Radeon DNA (RDNA4: Radeon RX 9000 series) | Consumer / Gaming | 32 (native), 64 (wave64 mode) |
 
 ## 25.4 ROCm Software Stack
 
@@ -4124,7 +4124,7 @@ hipify-perl --print-stats cuda_source.cu
 | Issue | CUDA Assumption | AMD Reality | Fix |
 |---|---|---|---|
 | Warp size | Always 32 | 64 on CDNA, 32 on RDNA | Use `warpSize` variable |
-| Shared memory | Up to 48 KB default | Up to 64 KB per CU | Check `hipDeviceProp_t` |
+| Shared memory | Up to 48 KB default | 64 KB per CU on CDNA2/CDNA3, 160 KB per CU on CDNA4 (one workgroup may use all of it); 128 KB per WGP on RDNA3/RDNA4 | Check `hipDeviceProp_t` (`sharedMemPerBlock`) |
 | `__shfl_sync` mask | `0xFFFFFFFF` (32 bits) | 64-bit wavefront needs `0xFFFFFFFFFFFFFFFF` | ROCm 7.0+: `__shfl_sync` etc. require a 64-bit mask (`0xffffffffffffffffull` or `__activemask()`). ROCm 6.2-6.4: opt in with `-DHIP_ENABLE_WARP_SYNC_BUILTINS`, or use the mask-free `__shfl*` |
 | Warp ballot | Returns `unsigned int` (32 bits) | Returns `unsigned long long` (64 bits) | Use appropriate type |
 | Register pressure | ~255 regs/thread | VGPRs differ per arch | `-Rpass-analysis=kernel-resource-usage` at compile time; `rocprofv3 --kernel-trace` at run time |
@@ -4166,17 +4166,20 @@ hipify-perl --print-stats cuda_source.cu
 
 ## 30.1 AMD CDNA Architecture Considerations
 
-CDNA (MI100, MI200, MI300 series) is AMD's data center GPU architecture:
+CDNA (MI100, MI200, MI300, MI350 series) is AMD's data center GPU architecture:
 
-| Feature | NVIDIA A100 (Ampere) | AMD MI250X (CDNA2) | AMD MI300X (CDNA3) |
-|---|---|---|---|
-| Compute Units / SMs | 108 SMs | 220 CUs (2 GCDs) | 304 CUs (8 XCDs) |
-| FP64 TFLOPS | 9.7 | 47.9 | 81.7 |
-| FP32 TFLOPS | 19.5 | 47.9 | 163.4 |
-| Memory | 80 GB HBM2e | 128 GB HBM2e | 192 GB HBM3 |
-| Memory BW | 2.0 TB/s | 3.2 TB/s | 5.3 TB/s |
-| Interconnect | NVLink | Infinity Fabric | Infinity Fabric |
-| Warp/Wavefront | 32 | 64 | 64 |
+| Feature | NVIDIA A100 (Ampere) | NVIDIA B200 (Blackwell) | AMD MI250X (CDNA2) | AMD MI300X (CDNA3) | AMD MI355X (CDNA4) |
+|---|---|---|---|---|---|
+| Compute Units / SMs | 108 SMs | 148 SMs (2 dies) | 220 CUs (2 GCDs) | 304 CUs (8 XCDs) | 256 CUs (8 XCDs) |
+| FP64 vector TFLOPS | 9.7 | 37 | 47.9 | 81.7 | 78.6 |
+| FP32 TFLOPS, one FMA per lane per clock | 19.5 | 75 | 47.9 | 81.7 | 78.6 |
+| FP32 TFLOPS, packed `v_pk_fma_f32` | -- | -- | 95.7 | 163.4 | 157.3 |
+| Memory | 80 GB HBM2e | 180 GB HBM3e | 128 GB HBM2e | 192 GB HBM3 | 288 GB HBM3E |
+| Memory BW | 2.0 TB/s | 8 TB/s | 3.2 TB/s | 5.3 TB/s | 8 TB/s |
+| Interconnect | NVLink | NVLink 5 | Infinity Fabric | Infinity Fabric | Infinity Fabric |
+| Warp/Wavefront | 32 | 32 | 64 | 64 | 64 |
+
+Compare FP32 across vendors on the "one FMA per lane per clock" row. AMD's quoted "FP32 vector" peak for CDNA3 and CDNA4 (163.4, 157.3) counts **packed** FP32, two FMAs per lane per instruction, which only code the compiler can pair into `v_pk_fma_f32` reaches. MI250X is quoted without packing (47.9), and its packed rate is 2 x 47.9 = 95.7 (220 CUs x 1.7 GHz x 256 FLOP/clk/CU). NVIDIA quotes one FP32 figure. Sources: AMD product pages ([MI250X](https://www.amd.com/en/products/accelerators/instinct/mi200/mi250x.html), [MI300X](https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html), [MI355X](https://www.amd.com/en/products/accelerators/instinct/mi350/mi355x.html)); B200 per-GPU values are the [HGX B200](https://www.nvidia.com/en-us/data-center/hgx/) 8-GPU totals divided by 8 (600 TFLOPS FP32, 296 TFLOPS FP64) and the [DGX B200](https://www.nvidia.com/en-us/data-center/dgx-b200/) totals divided by 8 (1,440 GB, 64 TB/s); the SM count is from [Chips and Cheese](https://chipsandcheese.com/p/nvidias-b200-keeping-the-cuda-juggernaut). The MI350X used for the measured examples in this repo is the same chip as the MI355X at 2.2 GHz instead of 2.4 GHz (144.2 TFLOPS packed FP32).
 
 ## 30.2 Wavefront Occupancy and Register Usage
 
@@ -4185,16 +4188,21 @@ AMD GPUs have two types of general-purpose registers:
 - **VGPRs** (Vector General Purpose Registers): per-lane (per-thread) registers
 - **SGPRs** (Scalar General Purpose Registers): shared across the wavefront
 
-```
-CU Register Budget (CDNA2 example):
-  - 512 VGPRs per SIMD unit
-  - 4 SIMD units per CU
-  - Total: 2048 VGPRs per CU
+```text
+CU register budget (CDNA2, CDNA3, CDNA4):
+  - Each SIMD has a VGPR file with 512 entries per lane
+    (512 x 64 lanes x 4 B = 128 KB per SIMD; 4 SIMDs = 512 KB per CU)
+  - Arch VGPRs and AGPRs (accumulation VGPRs) come from that one unified file:
+    up to 512 per wave (at most 256 of each kind), allocated in granules of 8
+  - Waves per SIMD = min(8, floor(512 / (VGPRs + AGPRs allocated per lane)))
 
 Occupancy impact:
-  - If kernel uses 128 VGPRs/thread → 512/128 = 4 wavefronts/SIMD
-  - If kernel uses 256 VGPRs/thread → 512/256 = 2 wavefronts/SIMD
+  - Kernel uses 128 VGPRs/lane -> 512/128 = 4 wavefronts/SIMD
+  - Kernel uses 256 VGPRs/lane -> 512/256 = 2 wavefronts/SIMD
+  - Kernel uses 100 VGPRs/lane -> rounded up to 104 -> floor(512/104) = 4 wavefronts/SIMD
 ```
+
+Sources: the "VGPR Allocation and Alignment" section of the [CDNA3](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf) and [CDNA4](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf) ISA guides (groups of eight, up to 512 total, 256 of each type) and the 512 KB per-CU VGPR file in AMD's [GPU hardware specifications](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
 
 ```bash
 # Compile time: the compiler reports per-kernel resource usage and the
@@ -4232,16 +4240,21 @@ LDS is AMD's equivalent of CUDA shared memory:
 // LDS declaration (same as shared memory syntax)
 __shared__ float lds_data[256];
 
-// LDS limits per CU:
-//   CDNA2 (MI200): 64 KB LDS per CU
-//   CDNA3 (MI300): 64 KB LDS per CU
-//   RDNA3: 64 KB LDS per WGP (2 CUs)
+// LDS limits:
+//   CDNA2 (MI200), CDNA3 (MI300): 64 KB per CU, 32 banks
+//   CDNA4 (MI350):               160 KB per CU, 64 banks
+//   RDNA3, RDNA4:                128 KB per WGP (2 CUs); RDNA3 caps one
+//                                workgroup at 64 KB
 
 // LDS bank conflicts:
-//   - 32 banks on AMD (same as NVIDIA)
+//   - 32 banks on CDNA2/CDNA3 (same count as NVIDIA), 64 banks on CDNA4
 //   - Bank width: 4 bytes
-//   - Same conflict avoidance techniques apply (padding, etc.)
+//   - Same conflict avoidance techniques apply (padding, XOR swizzle)
 ```
+
+Sources: the LDS sections of the [CDNA3](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf) ISA guide (64 kB, 32 banks), the [CDNA4](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf) ISA guide (160 kB, 64 banks of 640 dwords), the [RDNA3](https://gpuopen.com/download/rdna3-shader-instruction-set-architecture-feb-2023.pdf) ISA guide (128 kB per WGP, 64 kB per work-group), and AMD's [GPU hardware specifications](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html) (RDNA4: 128 KiB).
+
+Measured evidence for both this section and the next is in [GPU Kernel Case Studies -- Why Each Step Helps](GPU_Kernel_Case_Studies.md#23-why-each-step-helps). On an MI350X (gfx950), uncoalesced transpose writes raised `TCP_TCC_WRITE_REQ_sum` 16x over a copy kernel, a stride-64 column read from a `[64][64]` LDS tile cost 65M `SQ_LDS_BANK_CONFLICT` cycles (a 64-way conflict on 64 banks), and padding the tile to `[64][65]` removed every conflict.
 
 ## 30.4 Memory Coalescing on AMD
 
@@ -4273,7 +4286,7 @@ This section is a working summary of the commands. Counter meanings, derived met
 | **`rocprof-sys`** (ROCm Systems Profiler) | Omnitrace (`omnitrace-*`) | Whole-application timeline | CPU sampling + instrumentation, HIP/HSA/RCCL/MPI/OpenMP, GPU activity, Perfetto output | Nsight Systems |
 | **`rocprof-compute`** (ROCm Compute Profiler) | Omniperf (`omniperf`) | Per-kernel deep dive | Speed-of-light panels, memory chart, roofline, instruction mix, occupancy limiters | Nsight Compute |
 | **`amd-smi`** | `rocm-smi` (still shipped) | Device management | Utilization, power, clocks, partitions, xGMI topology | `nvidia-smi` |
-| **`roc-obj-ls` / `roc-obj`** | -- | Binary inspection | List and extract code objects (`.hsaco`) embedded in a fat binary | `cuobjdump` |
+| **`llvm-readobj --offloading`** / **`llvm-objdump --offloading`** (in `lib/llvm/bin`) | `roc-obj-ls` / `roc-obj-extract` ([deprecated in ROCm 6.4](https://rocm.docs.amd.com/en/docs-6.4.0/about/release-notes.html), not shipped in current TheRock builds such as the 10.1.0 nightly) | Binary inspection | List (`readobj`) and extract (`objdump`) the code objects (`.hsaco`) embedded in a fat binary | `cuobjdump` |
 
 The renames took effect in **ROCm 6.3** (December 2024). The packages became `rocprofiler-compute` and `rocprofiler-systems`, and the binaries became `rocprof-compute` and `rocprof-sys-*`. `rocprofv3` with ROCprofiler-SDK became the recommended profiler in the ROCm 6.2-6.4 timeframe. ROCm 6.4 put the legacy `rocprof`, `rocprofv2`, ROCProfiler, and ROCTracer into critical-fixes-only mode, and they are scheduled for end of support. In **ROCm 7.0**, `rocprofv3`'s default output format became **rocpd** (a SQLite database), and `rocprof-compute` switched to `rocprofv3` as its default collection backend.
 
@@ -4349,7 +4362,8 @@ rocprof-compute profile --name my_app -k gemm --kernel-iteration-range 1 -- ./my
 #   dispatch id ("-d 0" = first), though some 3.9 builds already treat it as 1-based
 #   per kernel. Check `rocprof-compute profile --help` on the installed version.
 rocprof-compute profile --name my_app --roof-only -- ./my_app      # roofline counters only
-rocprof-compute profile --list-available-metrics                   # block -> section -> metric ids
+rocprof-compute analyze --list-metrics gfx942                      # block -> section -> metric ids for any arch
+rocprof-compute profile --list-available-metrics                   # same, for the GPU in this machine (both in 3.9.0)
 
 # Analyze: results live under workloads/<name>/<gpu_model>/
 rocprof-compute analyze -p workloads/my_app/MI300X_A1/ --list-stats   # kernels and dispatch ids
@@ -6005,10 +6019,14 @@ hipExtStreamCreateWithCUMask(&s, static_cast<uint32_t>(mask.size()), mask.data()
 **AMD:**
 - **No MPS-style daemon is needed for concurrency.** Each process owns its own user-mode queues and GPU virtual address space (VMID). The firmware hardware scheduler maps queues from several processes at once, so kernels from different processes can run concurrently. The limits are hardware queue slots and the number of processes per scheduling quantum. Past those limits the runlist is **oversubscribed** and round-robin time-sliced, and performance drops sharply. Reducing `GPU_MAX_HW_QUEUES` per process helps many processes fit.
 - **Spatial partitioning on MI300X (and later):**
-  - **Compute partitions:** **SPX** (one GPU with all 8 XCDs), **DPX** (2), **QPX** (4), and **CPX** (8 partitions, one XCD and 38 CUs each).
-  - **Memory (NUMA) partitions:** **NPS1** (interleaved across all HBM stacks) and **NPS4** (each quarter of HBM local to its XCDs).
-  - CPX + NPS4 turns one MI300X into 8 logical GPUs, 64 per 8-GPU node, each with local memory. That suits many small models and improves memory locality.
-  - Partitions are set with `amd-smi set -C CPX` / `amd-smi set -M NPS4` (root, no running workloads). The available modes differ by product; MI350-series parts also support DPX + NPS2.
+  - **Compute partitions:** **SPX** (one GPU with all 8 XCDs), **DPX** (2), **QPX** (4), and **CPX** (8 partitions, one XCD each: 38 CUs on MI300X, 32 on MI350X/MI355X).
+  - **Memory (NUMA) partitions:** **NPS1** (interleaved across all 8 HBM stacks), **NPS2** (two halves), and **NPS4** (each quarter of HBM local to its XCDs; MI300X only).
+  - **Valid combinations.** The number of memory partitions cannot exceed the number of compute partitions.
+    - MI300X: SPX + NPS1; DPX + NPS1 or NPS2; QPX or CPX + NPS1 or NPS4.
+    - MI350X / MI355X: SPX + NPS1; DPX, QPX or CPX + NPS1 or NPS2. There is no NPS4. On this repo's MI350X host, `sudo amd-smi partition --accelerator` lists memory caps `NPS1` for SPX and `NPS1,NPS2` for DPX, QPX and CPX.
+    - Sources: the [AMD SMI partitioning guide](https://rocm.docs.amd.com/projects/amdsmi/en/develop/conceptual/partition.html) (MI300X matrix and the rule above) and the [MI350 Series microarchitecture](https://rocm.docs.amd.com/en/develop/reference/gpu-arch/mi350.html) page (NPS1 or NPS2). Run `sudo amd-smi partition --accelerator` on your own system, because support also depends on firmware.
+  - CPX + NPS4 turns one MI300X into 8 logical GPUs, 64 per 8-GPU node, each with local memory. That suits many small models and improves memory locality. The MI350-series equivalent is CPX + NPS2: 8 logical GPUs with 36 GB each, every XCD local to one 144 GB half of HBM.
+  - Partitions are set with `amd-smi set -C CPX` / `amd-smi set -M NPS4` (root, no running workloads). A memory-mode change takes effect only after a driver reload (`modprobe -r amdgpu && modprobe amdgpu`), and per the [MI300X partitioning docs](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/overview.html) the compute mode reverts to SPX on a reboot or driver reload. So set the memory mode first, reload, then set the compute mode.
 
 | Mechanism | Concurrency | Isolation (memory / fault / QoS) | Granularity |
 |---|---|---|---|
@@ -6017,7 +6035,7 @@ hipExtStreamCreateWithCUMask(&s, static_cast<uint32_t>(mask.size()), mask.data()
 | NVIDIA MIG | Yes | Yes / yes / yes | Fixed slices (up to 7) |
 | AMD multi-process (HWS) | Yes, up to the queue limits | Yes / mostly / no | Whole GPU |
 | AMD CU masking | Yes | Same process / no / CU-level QoS | Per CU |
-| AMD compute + memory partitions | Yes | Yes / yes / yes | XCD (CPX) and HBM quarter (NPS4) |
+| AMD compute + memory partitions | Yes | Yes / yes / yes | XCD (CPX) and HBM half or quarter (NPS2 / NPS4) |
 
 ## 35.7 Overlapping Communication with Computation
 

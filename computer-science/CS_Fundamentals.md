@@ -902,9 +902,11 @@ A 50 GB hash table with random access misses the TLB on nearly every lookup with
 | Downsides | Static sizing; memory unusable for anything else | **Latency spikes** from synchronous compaction or defrag; **memory bloat** (a 4 KB touch commits 2 MB); expensive COW after `fork` |
 | Typical use | DPDK, Oracle/PostgreSQL shared buffers, HPC | `madvise` mode + `madvise(MADV_HUGEPAGE)` on big heaps. Redis and many databases recommend `never` or `madvise`. |
 
+> The canonical treatment, with TLB-reach tables per structure and measured 4 KiB vs 2 MiB pointer-chase numbers, is [Performance Engineering 5.8: TLB Effects and Huge Pages](Performance_Engineering.md#58-tlb-effects-and-huge-pages). The hardware side (TLB levels, page walks, PCID, shootdowns) is in [7.6](#76-virtual-memory).
+
 ### NUMA (Non-Uniform Memory Access)
 
-Multi-socket servers, and chiplet CPUs configured with several NUMA nodes per socket (AMD EPYC "NPS1/NPS2/NPS4" BIOS setting), have memory attached to specific nodes. Remote access costs extra latency (commonly 1.3-2x local) and crosses the inter-socket fabric bandwidth.
+Multi-socket servers, and chiplet CPUs configured with several NUMA nodes per socket (AMD EPYC "NPS1/NPS2/NPS4" BIOS setting), have memory attached to specific nodes. Remote access costs extra latency (about 1.5-2x local) and crosses the inter-socket fabric bandwidth. On a 2-socket EPYC 9655 (Zen 5, NPS1), a dependent pointer chase over 1 GiB with 2 MiB pages measured 116 ns per load from local memory and 219 ns from the other socket (1.9x; `numactl --physcpubind=2 --membind=0|1`). `numactl -H` reports a distance of 32 vs 10 on the same machine: SLIT distances are relative hints from firmware, not latency ratios. See [Performance Engineering 7.1](Performance_Engineering.md#71-numa-topology) for placement policies and measured bandwidth effects.
 
 | Concept | Detail |
 |---|---|
@@ -4672,7 +4674,7 @@ Python 3.14 changed the default start method on Linux (and other POSIX systems e
 
 ### Instruction Cycle (Fetch-Decode-Execute)
 
-```
+```text
 ┌─────────┐     ┌──────────┐     ┌──────────┐
 │  Fetch   │────▶│  Decode  │────▶│ Execute  │
 │          │     │          │     │          │
@@ -4732,7 +4734,7 @@ Pipelining overlaps the execution of multiple instructions, like an assembly lin
 | 4. Memory Access | MEM | Read from or write to data memory |
 | 5. Write Back | WB | Write result back to register file |
 
-```
+```text
 Time →       1    2    3    4    5    6    7    8
 Instr 1:    IF   ID   EX  MEM   WB
 Instr 2:         IF   ID   EX  MEM   WB
@@ -4768,26 +4770,28 @@ Instr 4:                   IF   ID   EX  MEM   WB
 
 ## 7.4 Memory Hierarchy
 
-```
+```text
             ┌──────────────┐
             │  Registers   │  ~1 ns,    bytes,     most expensive
             ├──────────────┤
-            │   L1 Cache   │  ~1 ns,    32-64 KB
+            │   L1 Cache   │  ~1 ns,    32-48 KB data per core
             ├──────────────┤
-            │   L2 Cache   │  ~4 ns,    256 KB-1 MB
+            │   L2 Cache   │  ~3-4 ns,  1-3 MB per core
             ├──────────────┤
-            │   L3 Cache   │  ~10 ns,   2-64 MB
+            │   L3 Cache   │  ~10 ns,   tens of MB, shared by a core cluster
             ├──────────────┤
-            │  Main Memory │  ~100 ns,  8-256 GB
+            │  Main Memory │  ~100 ns,  8 GB (laptop) to several TB (server)
             │   (DRAM)     │
             ├──────────────┤
-            │     SSD      │  ~16 μs,   256 GB-4 TB
+            │  NVMe SSD    │  ~10-100 μs, up to tens of TB
             ├──────────────┤
-            │     HDD      │  ~2-10 ms, 1-20 TB,   least expensive
+            │     HDD      │  ~2-10 ms, up to tens of TB, least expensive
             └──────────────┘
 ```
 
 **Key insight:** Each level is larger but slower. The hierarchy exploits **locality of reference** to keep frequently accessed data close to the CPU.
+
+The sizes are 2024-2026 parts. L2 is 1 MB per core on AMD Zen 4/5, 2 MB on Intel server cores and up to 3 MB on Lion Cove (Arrow Lake). L3 is shared per core cluster: 32 MB per 8-core CCD on Zen 5, and 96 MB per CCD on 3D V-Cache (X3D) parts (sources: [AMD Zen 5 Software Optimization Guide 58455](https://docs.amd.com/v/u/en-US/58455_1.00), [Chips and Cheese: Lion Cove](https://chipsandcheese.com/p/lion-cove-intels-p-core-roars)). The host used for the measurements in these notes (2x EPYC 9655) reports L1D 48 KiB 12-way, L2 1 MiB 16-way, and L3 32 MiB 16-way shared by 8 cores (`/sys/devices/system/cpu/cpu0/cache/index*/`). The latencies are orders of magnitude. The measured ladder and the wider latency table (locks, context switches, network) live in one place: [Performance Engineering 1.2: Latency Numbers to Know](Performance_Engineering.md#12-latency-numbers-to-know).
 
 ---
 
@@ -4834,6 +4838,38 @@ Write-back is more common because it reduces memory bus traffic.
 | **Capacity** | Cache too small to hold the working set | Larger cache |
 | **Conflict** | Multiple blocks map to the same set (associativity limit) | Higher associativity |
 
+### Inclusion Policies: Inclusive, Exclusive (Victim), and Non-Inclusive
+
+A multi-level hierarchy must decide whether a line held in a private L1/L2 is also kept in the shared L3.
+
+| Policy | Rule | Effective capacity | How the chip knows which core has a line | Examples |
+|---|---|---|---|---|
+| **Inclusive** | Every line in a private cache is also in L3 | L3 only: L2 contents are duplicated in L3 | L3 tags answer "is it on chip, and where?" Evicting a line from L3 must **back-invalidate** the private copies | Intel client L3s and Xeon L3s before Skylake-SP |
+| **Exclusive / victim** | L3 is filled only by lines evicted from L2; a hit moves the line back up | L2 + L3 | Separate **shadow tags** of each L2 | AMD Zen L3, one per CCX/CCD |
+| **Non-inclusive (NINE: non-inclusive, non-exclusive)** | No rule: fills may or may not allocate in L3 | Close to L2 + L3 | A **snoop filter** tracks lines held in private caches | Intel Skylake-SP and later Xeon L3 |
+
+What the AMD guide says about Zen 5: the 1 MB L2 is inclusive of L1, and the L3 "is a write-back cache populated by L2 victims". On an L3 hit the line is removed from L3 if the access was a store or only one core has read it. It stays in L3 for code fetches and for lines read by several cores. The L3 keeps shadow tags of every L2 in the CCX, so a miss in the requester's L2 and in L3 can still be served by a cache-to-cache transfer from another core's L2 (average L3 load-to-use latency: 46 cycles). On Skylake-SP, Intel moved to a non-inclusive L3 and recommends counting per-core cache as L2 plus the L3 share. Because a line absent from L3 can still sit in some core's L2, "a snoop filter is used to keep track of the location of cache lines in the L1 or MLC of cores" (sources: [AMD Zen 5 Software Optimization Guide 58455, section 2.6](https://docs.amd.com/v/u/en-US/58455_1.00), [Intel Optimization Reference Manual 248966, section 2.6.1.2](https://www.intel.com/content/www/us/en/content-details/671488/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html), [Intel Xeon Scalable technical overview](https://www.intel.com/content/www/us/en/developer/articles/technical/xeon-processor-scalable-family-technical-overview.html)).
+
+What the policy changes for software:
+- **Capacity.** On a Zen 5 CCD a single core can hold about 1 MB (L2) + 32 MB (L3) of distinct data. With an inclusive design, the L2 copy would be wasted space in L3.
+- **Interference.** In an inclusive L3, a core streaming through memory can evict lines that another core is actively using in its L1/L2 (back-invalidation, also called inclusion victims). In a victim L3, streaming data from one core passes through L3 only on its way out of L2.
+- **Topology.** An AMD L3 belongs to one CCD. A core never allocates into another CCD's L3, so a single thread on a 96-core EPYC 9655 sees 32 MB of L3, not the socket's 384 MB. Data shared across CCDs is transferred through the I/O die (see [Performance Engineering 7.1](Performance_Engineering.md#71-numa-topology)).
+
+### Replacement Policies
+
+When a set is full, the cache must pick a victim:
+
+| Policy | Mechanism | Hardware cost | Weakness |
+|---|---|---|---|
+| **LRU** | Exact recency order per set | log2(N!) bits per set, impractical beyond about 8 ways | A cyclic loop over N+1 lines that map to one N-way set misses every time. A one-off scan flushes the whole working set. |
+| **Tree pseudo-LRU** | N-1 bits per set form a binary tree; each bit points toward the less recently used half | Cheap; common in L1 caches | Approximates LRU, with the same scan problem |
+| **RRIP** (SRRIP, DRRIP) | 2 bits per line predict the "re-reference interval". New lines are inserted as "distant", hits mark a line "near", and the victim is a line predicted most distant. DRRIP uses set dueling to choose between SRRIP and a thrash-resistant bimodal insertion. | 2 bits per line | Designed to resist scans and thrashing; mispredicts some reuse patterns |
+| **Random** | Pick any way | Almost free | No pathological case, and no protection either |
+
+**Why scans thrash LRU (worked).** A loop touches lines A1..A17, all mapping to one 16-way set. Under LRU, each access evicts the line that will be needed soonest (the next one in the cycle), so the hit rate is 0 %. Under an insertion policy that places new lines at the LRU position (the "bimodal" half of DIP/DRRIP), A17 evicts A1, then A1 evicts A17, while A2..A16 stay resident and hit: 15 of 17 accesses hit (88 %). The RRIP paper reported average throughput gains of 4 % (SRRIP) and 10 % (DRRIP) over LRU for a 2 MB single-core LLC. Vendors rarely document their L2 and L3 policies, but reverse engineering of Intel's Ivy Bridge L3 found exactly this kind of adaptive, set-dueling insertion (sources: [Jaleel et al., ISCA 2010](https://jaleels.org/ajaleel/publications/isca2010-rrip.pdf), [Henry Wong: Ivy Bridge cache replacement](https://blog.stuffedcow.net/2013/01/ivb-cache-replacement/)).
+
+Software can opt out of polluting the cache: on Zen 5, lines filled with `PREFETCHNTA` "are marked for quicker eviction from the L2, and when evicted from the L2 are not inserted into the L3" (AMD guide 58455, section 2.6.4). Non-temporal stores (below) do the same for writes.
+
 ### Cache Coherence (MESI Protocol)
 
 In multi-core systems, each core has its own cache. If core A modifies a cache line that core B also has cached, the caches become inconsistent. The MESI protocol maintains coherence:
@@ -4847,6 +4883,49 @@ In multi-core systems, each core has its own cache. If core A modifies a cache l
 
 **False sharing:** Two cores modify different variables that happen to share the same cache line. This causes the cache line to bounce between cores (invalidation traffic) even though there is no logical data sharing. Solution: pad data structures so unrelated fields are on different cache lines.
 
+### MOESI and MESIF: A Two-Core Transition Trace
+
+Real protocols add one state to MESI to avoid a specific expensive transfer:
+
+| Protocol | Extra state | What it saves | Used by |
+|---|---|---|---|
+| **MESI** | -- | Baseline. A Modified line that another core reads must be written back, so both copies become clean Shared. | The textbook protocol |
+| **MOESI** | **Owned**: dirty *and* shared. The owner supplies the data to readers and must write it back on eviction; memory may be stale. Only one cache can hold O, and the others hold S. | The writeback to DRAM when a dirty line is read by another core | AMD64 (APM Vol. 2, section 7.3) |
+| **MESIF** | **Forward**: clean and shared, and exactly one sharer is designated to answer requests. The other holders are S, and S copies never forward. | Duplicate responses from many sharers, and a trip to memory for clean shared data | Intel, introduced with QuickPath Interconnect |
+
+Trace of one line X on two cores (step 3 is where the protocols differ):
+
+| Step | Event | MESI (core 0 / core 1) | MOESI | MESIF |
+|---|---|---|---|---|
+| 1 | Core 0 reads X; no one else has it | E / I (data from memory) | E / I | E / I |
+| 2 | Core 0 writes X | M / I (silent E→M upgrade, no traffic) | M / I | M / I |
+| 3 | Core 1 reads X | Core 0 supplies the data **and writes it back**: S / S | Core 0 supplies the data, **no writeback**: O / S | Writeback; the line is now clean and one sharer, typically the requester, holds F: S / F |
+| 4 | Core 1 writes X | Invalidate core 0's copy: I / M | Invalidate the O copy; dirty ownership moves: I / M | I / M |
+| 5 | Core 0 reads X | Core 1 supplies and writes back: S / S | O on core 1, S on core 0 | Writeback; typically F on core 0, S on core 1 |
+
+The step 1 → 2 upgrade is why read-then-write on private data is cheap: E means "no one else has it", so the write needs no bus transaction. Steps 3-5 are the false-sharing ping-pong: every write by the other core costs an invalidation plus a cache-to-cache transfer. These tables are the architectural view. Hardware adds transient states for requests in flight, and the AMD manual calls its MOESI diagram "a logical software view, not a hardware view" (sources: [AMD64 APM Vol. 2 (24593), section 7.3](https://www.cs.wm.edu/~smherwig/readings/manuals/amd/sdm/amd64_arch_programmers_manual-vol2-system_programming.pdf), [Intel: An Introduction to the QuickPath Interconnect](https://www.intel.com/content/dam/doc/white-paper/quick-path-interconnect-introduction-paper.pdf)).
+
+### Snooping, Directories, and Probe Filters
+
+| Scheme | How a miss finds the other copies | Scales to | Cost |
+|---|---|---|---|
+| **Snooping (broadcast)** | Every miss is broadcast to every cache, and each one checks its tags | A few cores on a shared bus or ring | Probe traffic grows with the core count on every miss |
+| **Directory** | Each line has a home node that records which caches hold it (a sharer bit-vector or an owner pointer). Requests go to the home, which forwards only to holders. | Hundreds of cores and multiple sockets | An extra hop (requester → home → owner → requester) and directory storage |
+| **Snoop / probe filter** | A directory-like cache of "which private caches might hold this line". A filter miss means no probe is needed. | Large chips | Filter capacity: evicting a filter entry forces the tracked line out of the private caches |
+
+Intel's QuickPath paper describes both styles: "source snoop" (the requester broadcasts, and data can arrive in two hops) and "home snoop" (the home agent snoops on the requester's behalf, three hops), noting that source snoop "is most effective in platforms with only a few agents". Current x86 servers combine the schemes. Within a Zen CCX, the L3's shadow tags act as the filter for the eight L2s. Between CCDs and sockets, the I/O die maintains coherence, and its probe filter avoids probing every CCD on a miss. Intel's non-inclusive Xeon L3 relies on a snoop filter for the same reason (sources: [AMD EPYC 9004 HPC tuning guide 58002](https://docs.amd.com/api/khub/documents/NgOfoW49HKdzztTeLBbekA/content), [Chips and Cheese: CDNA 3 compute architecture](https://chipsandcheese.com/p/amds-cdna-3-compute-architecture), Intel overview above). The practical consequence is in the latency: a line modified by a core on another CCD or socket costs a directory lookup plus a cache-to-cache transfer across the fabric, which is why cross-CCD and cross-socket sharing (locks, atomics, false sharing) is far more expensive than sharing within one CCD.
+
+### Non-Temporal Stores and Avoiding the RFO
+
+A normal store that misses must first **read for ownership (RFO)**: fetch the line in M state, then merge the new bytes. For write-only streams, that doubles DRAM traffic. A `memset` of N bytes reads N and writes N, and `dst[i] = src[i]` moves 3N bytes for N bytes of useful copy (read src, RFO dst, write back dst).
+
+**Non-temporal (streaming) stores** (`movnti`, `vmovntdq`, `_mm256_stream_si256`, `_mm512_stream_si512`) collect a full 64 B line in a write-combining buffer and send it straight to memory. There is no RFO and no cache pollution, so the copy traffic falls from 3N to 2N. They hurt when:
+- the data is read again soon (it is no longer in cache),
+- lines are written only partially (partial write-combining flushes are slow), or
+- the destination fits in cache anyway.
+
+They are also **weakly ordered**, so an `sfence` is needed before publishing a "data ready" flag to another thread. Zen 5 applies both ideas automatically to `rep movs`/`rep stos`: at sizes of at least the L3 size it uses streaming stores, and at smaller sizes, in some system configurations, it skips the RFO for destination lines that are fully overwritten (AMD guide 58455, section 2.13.6). The measured STREAM byte accounting with and without write-allocate is in [Performance Engineering 5.9](Performance_Engineering.md#59-dram-organization-and-measuring-bandwidth).
+
 > See also: [Performance Engineering: Memory Hierarchy Programming](Performance_Engineering.md#5-memory-hierarchy-programming) for cache-aware code (loop order, tiling, prefetching, `alignas(64)` padding benchmarks) and [CS Fundamentals Drills](../practice/CS_Fundamentals_Drills.md) for address tag/index/offset breakdown exercises. Coherence explains why "volatile/atomic bypass the cache" is a myth: see [6.9](#69-memory-models-and-visibility).
 
 ---
@@ -4857,7 +4936,7 @@ In multi-core systems, each core has its own cache. If core A modifies a cache l
 
 Virtual memory maps virtual addresses to physical addresses using **page tables**. Each process has its own page table.
 
-```
+```text
 Virtual Address: [ Virtual Page Number (VPN) | Page Offset ]
                          │
                     Page Table
@@ -4866,16 +4945,133 @@ Virtual Address: [ Virtual Page Number (VPN) | Page Offset ]
 Physical Address: [ Physical Frame Number (PFN) | Page Offset ]
 ```
 
-**Multi-level page tables** reduce memory overhead by only allocating page table entries for address ranges actually in use. x86-64 uses a 4-level page table (PML4 → PDPT → PD → PT).
+**Multi-level page tables** reduce memory overhead by only allocating page table entries for address ranges actually in use. x86-64 uses a 4-level page table (PML4 → PDPT → PD → PT), which covers 48-bit virtual addresses (256 TiB). **5-level paging (LA57)** adds a PML5 level for 57-bit virtual addresses (128 PiB) and 4 PiB of physical address space. Linux uses it when the CPU supports it (the `la57` flag), but keeps user `mmap` results below 47 bits unless the program passes a hint address above that, because some software stores tags in the upper pointer bits (source: [kernel docs: 5-level paging](https://docs.kernel.org/arch/x86/x86_64/5level-paging.html)). The EPYC 9655 host used in these notes runs with LA57: `lscpu` reports "57 bits virtual", and an `mmap` hint at `1ULL << 50` is honored.
 
 ### TLB (Translation Lookaside Buffer)
 
-A hardware cache of recent virtual-to-physical translations. A TLB miss requires a page table walk (multiple memory accesses). TLB is typically:
+A hardware cache of recent virtual-to-physical translations, consulted on every load, store, and instruction fetch. x86 L1 data caches are **virtually indexed, physically tagged (VIPT)**. A 48 KiB 12-way L1D has 4 KiB per way (64 sets of 64 B), so its set index uses only address bits [11:6], which lie inside the 4 KiB page offset. The cache set lookup and the TLB lookup therefore run in parallel, and the physical tag from the TLB is compared at the end.
 
-- L1 TLB: 64-128 entries, 1-cycle access
-- L2 TLB: 512-2048 entries, ~10-cycle access
+| Data TLB | AMD Zen 4 | AMD Zen 5 | Intel Golden Cove | Intel Lion Cove |
+|---|---|---|---|---|
+| L1 DTLB (fully associative) | 72 entries | 96 entries | 96 (4 KiB pages, loads) | 128 (4 KiB pages, loads) |
+| L2 TLB | 3072 entries, 24-way | 4096 entries, 16-way (plus a 1024-entry 1 GiB-page array) | 2048 entries | Unchanged from Redwood Cove |
+| Extra latency for an L2 TLB hit | About 7-8 cycles | About 7 cycles | -- | About 7 cycles |
 
-**Context switches flush the TLB** (or use ASID -- Address Space Identifier -- to tag entries per process, avoiding flushes).
+Zen 4 and Zen 5 can also merge four contiguous, 16 KiB-aligned 4 KiB pages with identical attributes into one TLB entry, which raises effective capacity when the OS happens to allocate physically contiguous memory (sources: AMD software optimization guides [57647 for Zen 4](https://github.com/bitRAKE/amd_zen_sogs) and [58455 for Zen 5](https://docs.amd.com/v/u/en-US/58455_1.00), section 2.7; [Intel Optimization Reference Manual](https://www.intel.com/content/www/us/en/content-details/671488/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html) section 2.4.1.1; Chips and Cheese on [Zen 4's memory subsystem](https://chipsandcheese.com/p/amds-zen-4-part-2-memory-subsystem-and-conclusion) and [Lion Cove](https://chipsandcheese.com/p/lion-cove-intels-p-core-roars)). TLB reach and huge pages are covered with measurements in [Performance Engineering 5.8](Performance_Engineering.md#58-tlb-effects-and-huge-pages).
+
+**Context switches do not have to flush the TLB.** TLB entries are tagged with an address-space identifier: the **PCID** (process-context identifier, held in CR3) on x86, and the **ASID** on Arm and RISC-V. When the kernel switches to a process whose tag is still live, the old entries stay valid and simply stop matching. Linux has used PCIDs since 4.14. It keeps a small per-CPU cache of recently used address spaces (`TLB_NR_DYN_ASIDS` = 6) rather than giving every process a permanent tag, and it flushes only when it recycles a tag. Kernel entries are marked global and survive every switch. Without PCID, every CR3 write flushes all non-global entries.
+
+**KPTI** (kernel page-table isolation, the Meltdown fix) gives each process two page tables: a user table that maps almost none of the kernel, and a full kernel table. Every syscall, interrupt, and exception switches between them. With PCID, the two tables have different tags, so the switch costs a CR3 write but no flush. On systems without PCID, "each CR3 write flushes the entire TLB. That means that each syscall, interrupt or exception flushes the TLB" (sources: [kernel docs: page table isolation](https://docs.kernel.org/arch/x86/pti.html), [kernelnewbies: Linux 4.14](https://kernelnewbies.org/Linux_4.14)). KPTI is only enabled on CPUs vulnerable to Meltdown. On the Zen 5 host, `/sys/devices/system/cpu/vulnerabilities/meltdown` reads "Not affected", so it is off. What still forces flushes is **changing a mapping** (`munmap`, `mprotect`, page migration, THP collapse): every CPU that might cache the old translation must drop it. That is a TLB shootdown, covered below.
+
+### Page Walks and Page-Walk Caches
+
+A miss in every TLB level starts a hardware page walk: up to 4 dependent loads (5 with LA57), PML5/PML4 → PDPT → PD → PT. Page-table entries are ordinary cacheable data, so each step can hit in L1, L2, or L3. Walkers also cache the upper levels. Zen 5 has six hardware walkers, a page-walk cache holding PDPEs and PDEs (which skip two or three levels), and a 64-entry page-directory cache for PML4 and PML5 entries, so a typical walk reads only the final PTE (AMD guide 58455, section 2.7.3).
+
+**Worked number (measured on the EPYC 9655 host).** A dependent pointer chase over 1 GiB, with one pointer per 64 B line, pinned with `numactl --physcpubind=2 --membind=0`:
+
+| Pages | Translations needed | ns per load (median of 3) |
+|---|---|---|
+| 4 KiB (`MADV_NOHUGEPAGE`) | 262,144 pages: far beyond the 4096-entry L2 DTLB | 131 |
+| 2 MiB (`MADV_HUGEPAGE`) | 512 pages: fits in the L2 DTLB | 116 |
+
+The walk adds about 15 ns to a load that already misses to DRAM. It is that cheap because 1 GiB of 4 KiB pages needs only 2 MiB of leaf PTEs (262,144 x 8 B), which stay in L2/L3. With a 100 GiB working set the PTEs alone are 200 MiB, the leaf PTE load itself misses to DRAM, and the walk can double the cost of each access. Counters: `dTLB-load-misses` (generic), `ls_l1_d_tlb_miss.all_l2_miss` (AMD: walks started), `dtlb_load_misses.walk_active` (Intel: cycles with a walk in progress).
+
+### Nested Paging Under Virtualization (2-D Walks)
+
+In a VM, the guest's page tables translate guest-virtual to guest-physical addresses, and the hypervisor's nested tables (AMD NPT, Intel EPT) translate guest-physical to host-physical addresses. Each pointer in the guest's walk is itself a guest-physical address, so it needs a full nested walk before it can be read. For an n-level guest and an m-level host, the worst case is (n+1)(m+1) - 1 memory references: **24** for 4-level guest and host, and **35** for 5-level guest and host, against 4 or 5 natively. Mitigations:
+- huge pages in the **host** (each 1 GiB nested entry removes a level from every inner walk) and in the guest,
+- page-walk caches that also hold nested-dimension entries (15-38 % guest speedup in the original AMD study), and
+- TLBs tagged by VM as well as by process (ASID/VPID), so VM switches do not flush.
+
+Zen 5 also "smashes" a large guest page backed by smaller host pages into TLB entries of the smaller size (AMD guide 58455, section 2.7.3). This is why TLB-heavy workloads (databases, JVMs, large hash tables) lose more performance in VMs than compute-bound ones (source: [Bhargava et al., "Accelerating Two-Dimensional Page Walks for Virtualized Systems", ASPLOS 2008](https://pages.cs.wisc.edu/~remzi/Classes/838/Spring2013/Papers/p26-bhargava.pdf)).
+
+### TLB Shootdowns
+
+TLBs are not kept coherent by hardware the way data caches are. When the kernel changes or removes a mapping that other CPUs may have cached, it must make them drop it:
+1. Update the PTE.
+2. Flush the local TLB entry (`invlpg`).
+3. Send an **inter-processor interrupt (IPI)** to every other CPU in the process's `mm_cpumask` (the CPUs that are running or recently ran this address space).
+4. **Wait** until every target has taken the interrupt, flushed its entry, and acknowledged.
+
+Only then can `munmap` free the page or `mprotect` return. The initiator stalls for the slowest target, and every target loses an interrupt's worth of work. The cost therefore grows with the number of CPUs the process runs on, which is why `munmap`, `mprotect`, `madvise(MADV_DONTNEED)`, and page migration are slow in a process with 64 busy threads, while the same calls are cheap in a single-threaded one.
+
+```cpp
+// shootdown.cpp -- cost of mprotect() on one 4 KiB page as the number of threads that
+// share the address space (and are running on other cores) grows.
+// Build: g++ -std=c++20 -O2 -Wall -Wextra -pthread shootdown.cpp -o shootdown
+// Run:   ./shootdown <spinning threads>   (pin with taskset; one thread per core)
+#include <sys/mman.h>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <thread>
+#include <vector>
+
+int main(int argc, char** argv) {
+    int nthreads = argc > 1 ? std::atoi(argv[1]) : 0;
+    long page = 4096;
+    auto* p = static_cast<char*>(mmap(nullptr, page, PROT_READ | PROT_WRITE,
+                                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (p == MAP_FAILED) return 1;
+    p[0] = 1;                                         // fault the page in
+    std::atomic<bool> stop{false};
+    std::atomic<int> ready{0};
+    std::vector<std::thread> spinners;
+    for (int i = 0; i < nthreads; ++i)                // these threads keep the mm live on their cores
+        spinners.emplace_back([&] {
+            ready.fetch_add(1);
+            while (!stop.load(std::memory_order_relaxed)) {}
+        });
+    while (ready.load() < nthreads) {}
+    const int iters = 20000;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < iters; ++i) {
+        mprotect(p, page, PROT_READ);                 // each call changes the PTE, so each one
+        mprotect(p, page, PROT_READ | PROT_WRITE);    // ends with a TLB flush on every CPU using this mm
+    }
+    double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+    stop = true;
+    for (auto& t : spinners) t.join();
+    std::printf("%3d other threads: %.2f us per mprotect pair\n", nthreads, us / iters);
+}
+```
+
+```bash
+for n in 0 1 2 3 7 15 63; do
+  sudo perf stat -e tlb:tlb_flush --filter 'reason == 1' \
+                 -e tlb:tlb_flush --filter 'reason == 4' \
+                 taskset -c 0-63 ./shootdown $n
+done
+# tlb_flush reason 1 = TLB_REMOTE_SHOOTDOWN (a CPU flushed because of an IPI)
+# tlb_flush reason 4 = TLB_REMOTE_SEND_IPI  (the initiator sent a shootdown IPI)
+```
+
+Measured on the 2x EPYC 9655 host (Linux 7.0, 20,000 `mprotect` pairs, median of 3 runs; cores 0-63 are distinct physical cores on socket 0):
+
+| Other threads | us per `mprotect` pair | Remote flushes by IPI | IPIs sent |
+|---|---|---|---|
+| 0 | 1.42 | 0 | 0 |
+| 1 | 3.77 | 40,000 | 40,000 |
+| 2 | 4.49 | 80,001 | 40,002 |
+| 3 | 2.87 | 12,870 | 4,291 |
+| 7 | 3.34 | 58,905 | 8,417 |
+| 15 | 2.75 | 26,925 | 1,797 |
+| 63 | 3.11 | 263,970 | 4,192 |
+
+**How to read it.**
+- With 1-2 other threads, every `mprotect` sends one IPI, delivered to each sibling. The pair goes from 1.4 us to 3.8-4.5 us: each shootdown costs about 1.2-1.5 us of IPI round trip.
+- From 3 other threads (4 active CPUs) on, the IPIs mostly disappear and the cost **stops growing**. Kernels since 6.15 use AMD's **INVLPGB/TLBSYNC** broadcast-invalidate instructions (Zen 3 and later) for processes active on more than 3 CPUs (`mm_active_cpus_exceeds(mm, 3)` in `arch/x86/mm/tlb.c`). These processes get a global ASID, and the flush is broadcast in hardware without interrupting the other cores. The residual IPIs come from flushes issued before the process was switched over (sources: [LWN: AMD broadcast TLB invalidation](https://lwn.net/Articles/1008298/), [Phoronix: INVLPGB merged for 6.15](https://www.phoronix.com/news/AMD-INVLPGB-Merged-Linux-6.15)).
+- On CPUs or kernels without broadcast invalidation (kernels before 6.15, AMD cores before Zen 3, and Intel cores unless the kernel supports Intel's newer Remote Action Request mechanism, which the INVLPGB series listed as follow-up work), the IPI path is the only path. The initiator then waits for 63 acknowledgements, and 63 busy cores take two interrupts per `mprotect` pair.
+
+What to do about it:
+- **Batch.** One `munmap` of a large range is one shootdown, while many small calls are many shootdowns.
+- **Avoid permission-toggling designs** on hot paths (guard pages flipped per request, `mprotect`-based write barriers).
+- **Tune allocators** so they do not return memory to the OS constantly. For example, raise jemalloc's `dirty_decay_ms` or glibc's `M_TRIM_THRESHOLD`, because `MADV_DONTNEED` also triggers a shootdown.
+- **Use huge pages,** which mean fewer entries to invalidate.
+- **Keep threads on fewer cores** if they do not need more.
+
+To detect shootdowns, look at the `TLB` row in `/proc/interrupts`, at `perf stat -e tlb:tlb_flush`, and at `flush_tlb_mm_range` / `native_flush_tlb_multi` in a `perf record -g` kernel profile.
 
 ### Page Faults
 
@@ -4894,7 +5090,7 @@ A hardware cache of recent virtual-to-physical translations. A TLB miss requires
 | Feature | HDD (Hard Disk Drive) | SSD (Solid State Drive) |
 |---|---|---|
 | Technology | Spinning magnetic platters + read/write head | NAND flash memory (no moving parts) |
-| Random read latency | 2-10 ms (seek time + rotational delay) | ~16 μs |
+| Random read latency | 2-10 ms (seek time + rotational delay) | ~10-100 μs for NVMe ([latency table](Performance_Engineering.md#12-latency-numbers-to-know)) |
 | Sequential throughput | 100-200 MB/s | 500-7000 MB/s (NVMe) |
 | IOPS (random) | ~100-200 | 10,000-1,000,000 |
 | Durability | Susceptible to shock/vibration | Shock-resistant; limited write endurance (TBW) |
@@ -4930,7 +5126,7 @@ GPUs have thousands of simple cores optimized for data-parallel workloads. A GPU
 
 | Aspect | CPU | GPU |
 |---|---|---|
-| Cores | Few, powerful (4-64) | Many, simple (thousands) |
+| Cores | Few, powerful: 8-24 on desktops, up to 192 per socket on servers (AMD EPYC 9965) | Many, simple (thousands of lanes; e.g. 256 CUs x 64-wide wavefronts on an MI350X) |
 | Optimized for | Low-latency, serial/complex tasks | High-throughput, data-parallel tasks |
 | Use cases | OS, applications, control flow | Graphics, ML training, scientific computing |
 
@@ -4947,7 +5143,7 @@ GPUs have thousands of simple cores optimized for data-parallel workloads. A GPU
 
 **Example:** The 32-bit integer `0x12345678` stored at address 0x00:
 
-```
+```text
 Big-endian:    [0x00]=12  [0x01]=34  [0x02]=56  [0x03]=78
 Little-endian: [0x00]=78  [0x01]=56  [0x02]=34  [0x03]=12
 ```
@@ -5000,19 +5196,59 @@ The 5-stage in-order pipeline in 7.3 stalls whenever an instruction waits, and a
 | **Retirement (commit)** | Uops leave the ROB head **in order**, once complete and no longer speculative. Only then do results become architecturally visible. This gives **precise exceptions**: a fault on instruction *k* is raised exactly when *k* reaches the head, with everything older committed and everything younger discarded. |
 | **Store buffer (SB)** | Retired stores wait here until written to L1. This is the store→load reordering behind the x86-TSO litmus test in [6.9](#69-memory-models-and-visibility). |
 
-Representative sizes (from vendor disclosures and public microbenchmark analyses; treat them as approximate):
+Four current cores side by side. "--" means the vendor has not published the number and no measurement was found.
 
-| Core | Dispatch/rename width | ROB entries |
-|---|---|---|
-| AMD Zen 4 | 6 | 320 |
-| AMD Zen 5 | 8 | 448 |
-| Intel Golden Cove (Alder Lake P-core) | 6 | 512 |
+| Structure | AMD Zen 4 | AMD Zen 5 | Intel Golden Cove (Alder Lake, Sapphire Rapids) | Intel Lion Cove (Lunar Lake, Arrow Lake) |
+|---|---|---|---|---|
+| x86 decode per cycle | 4 | 2 clusters x 4; a single thread uses one cluster | 6 | 8 |
+| Op / uop cache | 6.75K macro-ops, 9 per cycle | 6K instructions, 12 per cycle | 4K uops, 8 per cycle | 5250 uops, 12 per cycle |
+| Rename / dispatch width | 6 | 8 | 6 | 8 |
+| ROB entries | 320 | 448 | 512 | 576 |
+| Integer physical registers | 224 | 240 | 280 | -- |
+| Load queue | 48 uncompleted + 88 completed | 64 uncompleted; completed loads not limited | 192 | -- |
+| Store queue | 64 | 104 | 114 | -- |
+| Integer ALUs | 4, plus a branch unit | 6 | 5 | 6 |
+| Memory operations per cycle | 3 (at most 2 stores) | 4 (at most 2 stores) | 3 loads + 2 stores | 3 store-address AGUs; sustained 2 stores |
+| L1 data cache | 32 KB, 4-5 cycles | 48 KB 12-way, 4-5 cycles | 48 KB, 5 cycles | 48 KB "L0", 4 cycles, plus 192 KB "L1", 9 cycles |
+| L2 (private) | 1 MB 8-way, 14+ cycles | 1 MB 16-way, 14+ cycles | 1.25 MB client / 2 MB server, 14-15 cycles | 2.5-3 MB, 17 cycles |
+| Branch mispredict penalty | 11-18 cycles, 13 typical | 12-18 cycles, 15 typical | "sometimes exceeding 20" (Agner Fog) | -- |
 
-**Worked number: how much latency can the window hide?** A 448-entry ROB at a sustained 4 IPC fills in 448 / 4 = 112 cycles, which is about 22 ns at 5 GHz. A DRAM miss costs about 80-100 ns. A load that misses to DRAM therefore eventually reaches the ROB head, the ROB fills behind it, and the core stalls ("backend bound, memory"). OoO hides L1 and L2 misses, and partially L3, but not DRAM latency unless several misses are in flight together (see memory-level parallelism below).
+Sources: AMD software optimization guides [57647 (Zen 4)](https://github.com/bitRAKE/amd_zen_sogs) and [58455 (Zen 5)](https://docs.amd.com/v/u/en-US/58455_1.00), chapter 2; [Intel Optimization Reference Manual 248966](https://www.intel.com/content/www/us/en/content-details/671488/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html), section 2.4; Chips and Cheese: [Popping the Hood on Golden Cove](https://old.chipsandcheese.com/2021/12/02/popping-the-hood-on-golden-cove/), [Lion Cove: Intel's P-Core Roars](https://chipsandcheese.com/p/lion-cove-intels-p-core-roars), [Intel's Lion Cove Architecture Preview](https://chipsandcheese.com/p/intels-lion-cove-architecture-preview); [Agner Fog, The microarchitecture of Intel, AMD and VIA CPUs](https://www.agner.org/optimize/microarchitecture.pdf), section 13.
+
+What the table decides:
+- **Window size vs memory latency.** ROB, register file, and load/store queues all bound how far the core can run ahead of a stalled load. Whichever fills first stops allocation. In games, Chips and Cheese found Zen 5's integer register file (240 entries) to be "a 'hot' resource, often limiting reordering capacity before the core's reorder buffer (ROB) fills" ([Running Gaming Workloads through AMD's Zen 5](https://chipsandcheese.com/p/running-gaming-workloads-through)).
+- **Width vs dependency chains.** An 8-wide machine only helps code with independent work. A single dependency chain runs at one op per latency, no matter how wide the core is.
+- **L2 size vs tiling.** Blocking for "L2" means 1 MB on Zen, 2 MB on Intel servers, and 3 MB on Arrow Lake, so tile sizes tuned on one vendor are wrong on the other.
+
+**Worked number: how much latency can the window hide?** A 448-entry ROB at a sustained 4 IPC fills in 448 / 4 = 112 cycles, which is about 25 ns at the 4.5 GHz the EPYC 9655 host's cores run at under load. A DRAM miss costs about 100-115 ns on that host (measured in the MLP benchmark below and in [7.6](#76-virtual-memory)). A load that misses to DRAM therefore eventually reaches the ROB head, the ROB fills behind it, and the core stalls ("backend bound, memory"). OoO hides L1 and L2 misses, and partially L3, but not DRAM latency unless several misses are in flight together (see memory-level parallelism below).
+
+### The Front End: Fetch, Decode, Op Cache, Loop Buffer, Fusion
+
+The front end must turn variable-length x86 bytes into ops at the rename width every cycle. It runs **decoupled** from the back end: the branch predictor produces a queue of fetch addresses ahead of fetch, so the predictor can run ahead while the I-cache waits on a miss.
+
+| Path | Intel name | AMD name | Delivers | Used for |
+|---|---|---|---|---|
+| Legacy fetch + decode | MITE | Instruction-cache (IC) mode | Golden Cove: 6 instructions/cycle from 32 B/cycle of fetch. Zen 5: 4 instructions/cycle per thread, from two 32 B fetch blocks per cycle | Cold code, large code footprints |
+| Decoded op cache | DSB (decoded stream buffer) | Op cache (OC) mode | Golden Cove: 8 uops/cycle. Lion Cove and Zen 5: 12/cycle | Hot code. A shorter pipeline, which also shortens the mispredict penalty |
+| Loop buffer | LSD (loop stream detector): replays a loop from the uop queue (IDQ, 144 uops per thread on Golden Cove) and lets fetch and decode sleep | Not described in AMD's Zen 4/5 guides | The rename width | Small loops with many iterations |
+
+Details that matter when a profile says "front-end bound":
+- **Op cache misses** fall back to the decoders. Zen 5 has two 4-wide decode clusters, but "in single-thread mode the maximum throughput is 4 instructions per cycle", so when one thread runs from legacy decode, it can feed only half of the 8-wide dispatch. Zen 5 switches between IC and OC mode only at taken branches, and the guide advises limiting hot regions to the op cache's capacity, which matters "when unrolling loops" (AMD guide 58455, sections 2.9 and 2.9.1).
+- **Macro-fusion** merges a flag-setting instruction with the following conditional branch into one op (`cmp`/`test`/`add`/`sub`/`inc`/`dec`/`and`/`or`/`xor` + `jcc` on Zen 5). Zen 5 also fuses a reg-reg `mov` with a following ALU instruction that writes the same register. Redwood Cove added MOV+OP and LOAD+OP fusion "only supported out of the μop-Cache". A fused pair uses one slot in the op cache, at dispatch, and in the ROB.
+- **Micro-fusion** (Intel) keeps a load+ALU instruction, or a store's address and data parts, as one uop through decode and the ROB, and splits it only in the schedulers. This is why `add rax, [mem]` can be cheaper in front-end bandwidth than `mov` + `add`.
+
+Measured on the Zen 5 host (`sudo perf stat -e de_src_op_disp.op_cache,de_src_op_disp.x86_decoder,de_src_op_disp.all`, 3 runs, identical to 0.1 %):
+
+| Workload | Ops from op cache | From x86 decoders | IPC |
+|---|---|---|---|
+| `branch_perf s 20` from the branch section below (hot loops of a few dozen bytes) | 99.9 % | 0.1 % | 2.2 |
+| `g++ -std=c++20 -O2 -c` of a 59-line C++ file (`cc1plus` has 26 MB of `.text`) | 73.3 % | 26.7 % | 2.2 |
+
+The compiler's large, branchy code misses the op cache on about a quarter of its ops. That is the signature of front-end-bound server software: big binaries, deep call stacks, and virtual dispatch. The fixes are code-layout fixes: PGO, BOLT, `-ffunction-sections` with hot/cold splitting, and huge pages for text. On Intel the equivalent counters are `idq.dsb_uops`, `idq.mite_uops`, and `lsd.uops`.
 
 ### Register Renaming
 
-Only **true** dependencies (read-after-write, RAW) carry data. **False** dependencies (write-after-read, WAR, and write-after-write, WAW) exist only because the ISA has few register *names* (16 GPRs on x86-64). The **register alias table (RAT)** maps each architectural register to one of hundreds of **physical** registers, and every new write gets a fresh physical register:
+Only **true** dependencies (read-after-write, RAW) carry data. **False** dependencies (write-after-read, WAR, and write-after-write, WAW) exist only because the ISA has few register *names* (16 GPRs on x86-64; Intel's announced **APX** extension doubles that to 32 and adds three-operand forms of integer instructions, so the compiler spills less. Intel reports "10% fewer loads and more than 20% fewer stores". As of late 2026 no shipping CPU supports it; Intel's Diamond Rapids Xeon, presented at Hot Chips 2026, is one of the first CPUs announced with it. Sources: [Intel APX overview](https://www.intel.com/content/www/us/en/developer/articles/technical/advanced-performance-extensions-apx.html), [Chips and Cheese: Hot Chips 2026, Diamond Rapids](https://chipsandcheese.com/p/hot-chips-2026-intels-diamond-rapids)). The **register alias table (RAT)** maps each architectural register to one of hundreds of **physical** registers, and every new write gets a fresh physical register:
 
 ```text
  Program (architectural)        After renaming (physical)
