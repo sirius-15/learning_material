@@ -8516,3 +8516,5 @@ If the language allows it, a handful of `assert` lines in `main()` is acceptable
 - [ ] Trade-offs are explained without overbuilding the design.
 - [ ] The design can be summarized in a few sentences.
 
+For more timed practice, [LLD Practice Problems](../practice/LLD_Practice_Problems.md) has twenty further problems (ride-sharing, wallet ledger, order book, text editor, spreadsheet, circuit breaker, load balancer, GPU caching allocator, and more) with full solutions and runnable code in the same format as the worked designs above.
+

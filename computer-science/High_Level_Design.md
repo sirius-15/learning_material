@@ -3220,10 +3220,10 @@ See also: [Payment Processing](#67-payment-processing), [LLD: Designing for Conc
 
 For each prompt, begin with the requirements and workload before selecting components.
 
-1. Design a collaborative document editor with concurrent updates and offline clients.
+1. Design a collaborative document editor with concurrent updates and offline clients. (Full solution: [HLD Practice A2](../practice/HLD_Practice_Problems.md#a2-collaborative-document-editor).)
 2. Design a search autocomplete service for a large product catalog. (Attempt first, then compare with [6.9](#69-search-autocomplete-typeahead).)
 3. Design a notification platform that sends email, push, and SMS with user preferences. (Attempt first, then compare with [6.11](#611-notification-system).)
-4. Design a photo-sharing application with albums, privacy controls, and image processing.
+4. Design a photo-sharing application with albums, privacy controls, and image processing. (Full solution: [HLD Practice A4](../practice/HLD_Practice_Problems.md#a4-photo-sharing-service-instagram).)
 5. Design a distributed job scheduler with recurring jobs, retries, and worker health checks. (Attempt first, then compare with [6.12](#612-distributed-job-scheduler).)
 6. Design a metrics ingestion and alerting platform with high write volume and time-based queries. (Attempt first, then compare with [6.13](#613-metrics-logging-and-monitoring-system).)
 
@@ -3232,6 +3232,7 @@ After drawing a design, explain one alternative, one failure scenario, and the m
 ### Where to practice next
 
 - **Timed mock interviews with model answers:** [HLD Mock Interviews](../practice/HLD_Mock_Interviews.md) has a [45-minute self-mock procedure](../practice/HLD_Mock_Interviews.md#2-running-a-45-minute-self-mock), an [evaluation rubric by level](../practice/HLD_Mock_Interviews.md#3-evaluation-rubric-by-level) (what separates mid-level, senior, and staff answers), and full mock scripts with follow-up questions and model answers. Do at least one per week under a timer, out loud.
+- **Twenty more problems with full model answers:** [HLD Practice Problems](../practice/HLD_Practice_Problems.md) (message queue, collaborative editor, Dropbox, leaderboard, ad-click aggregation, distributed cache, stock exchange, Airbnb, flash sale, maps, Zoom, lock service, search engine, email, food delivery, and more).
 - **ML and HPC infrastructure prompts:** [ML Systems Design](../ml-gpu/ML_Systems_Design.md) covers [LLM inference serving](../ml-gpu/ML_Systems_Design.md#4-case-study-llm-inference-serving-platform), [distributed training on 512 MI300X](../ml-gpu/ML_Systems_Design.md#5-case-study-distributed-training-of-a-70b-model-on-512-mi300x), and a [GPU cluster job scheduler](../ml-gpu/ML_Systems_Design.md#6-case-study-gpu-cluster-job-scheduler). Those designs use the same process as this file, plus [ML-specific numbers](../ml-gpu/ML_Systems_Design.md#3-numbers-every-ml-systems-engineer-should-know).
 - **Estimation drills:** [Fermi Estimation](Math_Probability_Estimation.md#9-fermi-estimation) for the arithmetic habits behind every capacity estimate in Section 6.
 - **Self-check for each prompt above:** write the capacity block first (QPS, storage, bandwidth, connections) in the style of [6.1](#61-url-shortener), then name which number drove which component.

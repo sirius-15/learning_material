@@ -1406,7 +1406,7 @@ No. "GPU utilization" reports the fraction of time any kernel is running, which 
 
 ## 14. Twenty Unsolved Practice Prompts
 
-Run these with the same 45-minute procedure. Hint outlines are in [Answers](#answers); read one only after your attempt. Prompts 17-20 are specific to GPU/HPC and tooling roles.
+Run these with the same 45-minute procedure. Hint outlines are in [Answers](#answers); read one only after your attempt. Prompts P1-P7, P9, P10, P14, and P15 also have full model answers in [HLD Practice Problems](HLD_Practice_Problems.md), along with nine further problems. Prompts 17-20 are specific to GPU/HPC and tooling roles.
 
 | # | Prompt (as the interviewer would say it) | Focus | Difficulty |
 |---|---|---|---|
@@ -1508,6 +1508,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 
 ### A1. Distributed Message Queue
 
+Full solution: [HLD Practice A1. Distributed Message Queue](HLD_Practice_Problems.md#a1-distributed-message-queue).
+
 - **Clarify:** ordering scope (per partition, not global), retention (for example 7 days), delivery semantics, number of consumer groups, message size.
 - **Numbers:** 1 GB/s × 86,400 s ≈ 86 TB/day; 7 days ≈ 600 TB; replication factor 3 ≈ 1.8 PB. If a partition sustains on the order of 10 MB/s, about 100+ partitions are needed for ingress alone; size brokers by disk throughput and network (each byte is written 3 times and read once per consumer group).
 - **Core design:** topics split into partitions; each partition is an append-only log of segment files with a leader and followers; producers batch and compress; consumers pull by offset; consumer-group offsets stored durably (for example in an internal compacted log); a controller (consensus-based) manages leadership and metadata.
@@ -1515,6 +1517,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 - **Traps:** promising global ordering; per-message delete as in a work queue; thousands of partitions per broker without considering metadata and recovery time; unclean leader election losing acknowledged data.
 
 ### A2. Collaborative Document Editor
+
+Full solution: [HLD Practice A2. Collaborative Document Editor](HLD_Practice_Problems.md#a2-collaborative-document-editor).
 
 - **Clarify:** concurrent editors per document (tens, not thousands), rich text or plain, offline editing, history and undo, comments.
 - **Numbers:** 100 editors × 5 operations/s = 500 ops/s per document, easily handled by one process, so the scaling unit is the document session, not the operation.
@@ -1524,6 +1528,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 
 ### A3. File Sync (Dropbox)
 
+Full solution: [HLD Practice A3. File Sync Service (Dropbox)](HLD_Practice_Problems.md#a3-file-sync-service-dropbox).
+
 - **Clarify:** file sizes, number of devices, sharing, version history, conflict policy.
 - **Numbers:** 100M users × 5 GB average ≈ 500 PB logical before dedupe; most changes are small edits to large files, so transfer deltas, not files.
 - **Core design:** split files into blocks (for example 4 MB, or content-defined chunking so an insertion does not shift every block), address blocks by content hash, upload only unknown blocks to object storage, and commit a new file version (a list of block hashes) to a strongly consistent metadata service; devices learn about changes through long-poll or push notifications and download missing blocks.
@@ -1531,6 +1537,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 - **Traps:** storing file bytes in the metadata database; re-uploading whole files on every change; ignoring the case of two devices editing offline.
 
 ### A4. Photo Sharing With Image Processing
+
+Full solution: [HLD Practice A4. Photo Sharing Service (Instagram)](HLD_Practice_Problems.md#a4-photo-sharing-service-instagram).
 
 - **Clarify:** uploads per day, photo size, derivative sizes, privacy model, feed or albums only.
 - **Numbers:** 100M uploads/day × 3 MB ≈ 300 TB/day of originals plus derivatives; reads are far higher and are served from a CDN.
@@ -1540,6 +1548,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 
 ### A5. Real-Time Leaderboard
 
+Full solution: [HLD Practice A5. Real-Time Leaderboard](HLD_Practice_Problems.md#a5-real-time-leaderboard).
+
 - **Clarify:** score update rate, leaderboard scopes (global, friends, daily, weekly), exact rank for everyone or only top-K exactly.
 - **Numbers:** 100M players × ~100 B ≈ 10 GB, so a single in-memory sorted set (skip list, O(log n) updates and rank queries) holds one leaderboard; the update rate (for example 200k/s) may exceed one node.
 - **Core design:** sorted set keyed by leaderboard and time window (`lb:global:2026-W45`), with expiry for old windows; scores persisted durably elsewhere; top-K cached.
@@ -1548,6 +1558,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 
 ### A6. Ad-Click Aggregation (Exactly Once)
 
+Full solution: [HLD Practice A6. Ad-Click Aggregation](HLD_Practice_Problems.md#a6-ad-click-aggregation).
+
 - **Clarify:** aggregation windows (per minute per ad), latency to dashboard, how late events can arrive, fraud filtering, reconciliation requirements.
 - **Numbers:** 1B clicks/day ≈ 12k/s average, about 50k/s at peak; aggregated output is small (ads × minutes).
 - **Core design:** click events with unique IDs into a durable log; a stream processor keyed by ad ID computes tumbling one-minute windows, deduplicates click IDs, and writes aggregates to an OLAP store; a periodic batch job recomputes from raw logs for reconciliation and billing.
@@ -1555,6 +1567,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 - **Traps:** `UPDATE count = count + 1` per click in a database; counting by processing time; no dedupe of client retries.
 
 ### A7. Distributed Cache Service
+
+Full solution: [HLD Practice A7. Distributed Cache Service](HLD_Practice_Problems.md#a7-distributed-cache-service).
 
 - **Clarify:** ops/s, value sizes, consistency expectations, multi-region, whether the cache may lose data.
 - **Numbers:** for example 10M ops/s; at a few hundred thousand to around a million simple ops/s per node, tens of nodes; memory sized by the hot set.
@@ -1572,6 +1586,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 
 ### A9. Nearby Places
 
+Full solution: [HLD Practice A8. Nearby Places (Yelp)](HLD_Practice_Problems.md#a8-nearby-places-yelp).
+
 - **Clarify:** number of places, query rate, radius, how often places change, ranking signal.
 - **Numbers:** for example 200M places and 100k queries/s; places change slowly, so the index can be rebuilt or patched offline and replicated to every server.
 - **Core design:** a geospatial index: geohash (for a 2 km radius use precision 5, cells about 4.9 km × 4.9 km, and search the cell plus its 8 neighbors; precision 6 cells, about 1.2 km × 0.6 km, would need about two rings of neighbors east-west and four north-south to cover 2 km, so pick the cell size to match the radius), a quadtree (adaptive cells, dense cities split deeper), or S2/H3 cell IDs; candidates filtered by exact distance and ranked by rating and distance; place details from a cache.
@@ -1579,6 +1595,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 - **Traps:** computing distance to every place; a SQL bounding-box query without a spatial index.
 
 ### A10. Stock Exchange Matching Engine
+
+Full solution: [HLD Practice A9. Stock Exchange Matching Engine](HLD_Practice_Problems.md#a9-stock-exchange-matching-engine).
 
 - **Clarify:** order types, symbols, throughput, latency target (microseconds), fairness rules (price-time priority).
 - **Numbers:** for example 1M orders/s across all symbols, but each symbol's book is handled by one thread, and a single in-memory match takes microseconds.
@@ -1612,6 +1630,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 
 ### A14. Online Coding Judge
 
+Full solution: [HLD Practice A10. Online Coding Judge](HLD_Practice_Problems.md#a10-online-coding-judge).
+
 - **Clarify:** languages, time and memory limits, contest peaks, how results are delivered.
 - **Numbers:** steady load is modest, but the last minutes of a contest can bring thousands of submissions per minute, each needing seconds of isolated CPU time.
 - **Core design:** submission API, a queue with priorities (contest over practice), worker pool running each submission in a sandbox (containers with seccomp filters and cgroup limits, or microVMs for stronger isolation), no network access, per-language compile and run images, results pushed to clients.
@@ -1619,6 +1639,8 @@ Hint outlines for [section 14](#14-twenty-unsolved-practice-prompts). Each lists
 - **Traps:** running submissions on the web servers; wall-clock time limits on shared machines.
 
 ### A15. Live Comments and Reactions for 10M Viewers
+
+Full solution: [HLD Practice A11. Live Comments and Reactions](HLD_Practice_Problems.md#a11-live-comments-and-reactions).
 
 - **Clarify:** comment rate, whether every viewer must see every comment, reaction types, latency target.
 - **Numbers:** 10k comments/s delivered to 10M viewers would be 1e11 deliveries/s, which is impossible and also unreadable. Each viewer sees perhaps 10 comments/s (about 2 KB/s), so total egress is about 20 GB/s, delivered through about 50 gateways at 200k connections each.
